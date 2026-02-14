@@ -36,61 +36,45 @@ func _build_ship_mesh():
 	engine_mat.emission = Color(0.1, 0.3, 0.8)
 	engine_mat.emission_energy_multiplier = 1.5
 
-	# Main body
+	# Main body - shorter, same width
 	var body := MeshInstance3D.new()
 	var body_mesh := BoxMesh.new()
-	body_mesh.size = Vector3(1.0, 0.35, 2.0)
+	body_mesh.size = Vector3(0.7, 0.25, 1.0)
 	body_mesh.material = body_mat
 	body.mesh = body_mesh
-	body.position = Vector3(0, 0, 0)
 	add_child(body)
 
 	# Nose cone
 	var nose := MeshInstance3D.new()
 	var nose_mesh := BoxMesh.new()
-	nose_mesh.size = Vector3(0.5, 0.2, 0.6)
+	nose_mesh.size = Vector3(0.35, 0.15, 0.3)
 	nose_mesh.material = accent_mat
 	nose.mesh = nose_mesh
-	nose.position = Vector3(0, 0.02, -1.1)
+	nose.position = Vector3(0, 0.02, -0.55)
 	add_child(nose)
 
-	# Left wing
-	var left_wing := MeshInstance3D.new()
+	# Small wings
 	var wing_mesh := BoxMesh.new()
-	wing_mesh.size = Vector3(0.9, 0.08, 0.8)
+	wing_mesh.size = Vector3(0.35, 0.04, 0.35)
 	wing_mesh.material = body_mat
+
+	var left_wing := MeshInstance3D.new()
 	left_wing.mesh = wing_mesh
-	left_wing.position = Vector3(-0.8, -0.08, 0.25)
+	left_wing.position = Vector3(-0.4, -0.05, 0.15)
 	add_child(left_wing)
 
-	# Right wing
 	var right_wing := MeshInstance3D.new()
 	right_wing.mesh = wing_mesh
-	right_wing.position = Vector3(0.8, -0.08, 0.25)
+	right_wing.position = Vector3(0.4, -0.05, 0.15)
 	add_child(right_wing)
-
-	# Left wing tip
-	var left_tip := MeshInstance3D.new()
-	var tip_mesh := BoxMesh.new()
-	tip_mesh.size = Vector3(0.2, 0.3, 0.3)
-	tip_mesh.material = accent_mat
-	left_tip.mesh = tip_mesh
-	left_tip.position = Vector3(-1.2, 0.03, 0.5)
-	add_child(left_tip)
-
-	# Right wing tip
-	var right_tip := MeshInstance3D.new()
-	right_tip.mesh = tip_mesh
-	right_tip.position = Vector3(1.2, 0.03, 0.5)
-	add_child(right_tip)
 
 	# Engine glow
 	var engine := MeshInstance3D.new()
 	var engine_mesh := BoxMesh.new()
-	engine_mesh.size = Vector3(0.5, 0.2, 0.2)
+	engine_mesh.size = Vector3(0.4, 0.15, 0.12)
 	engine_mesh.material = engine_mat
 	engine.mesh = engine_mesh
-	engine.position = Vector3(0, 0, 1.05)
+	engine.position = Vector3(0, 0, 0.5)
 	add_child(engine)
 
 func _physics_process(delta):
@@ -121,10 +105,11 @@ func _physics_process(delta):
 	velocity = vel
 	move_and_slide()
 
-	# Wall collision: any collision with a mostly-horizontal normal is a wall
+	# Wall collision: only head-on (forward into wall), not side bumps
 	for i in get_slide_collision_count():
 		var col := get_slide_collision(i)
-		if col.get_normal().y < 0.5:
+		var normal := col.get_normal()
+		if normal.y < 0.5 and normal.z > 0.5:
 			start_explosion()
 			return
 
@@ -153,16 +138,16 @@ func start_warp():
 	add_child(_warp_trail)
 
 	var tween := create_tween()
-	# Phase 1: Engine powers up - trail grows
-	tween.tween_property(_warp_trail, "scale:z", 15.0, 0.5)
-	tween.parallel().tween_property(_warp_trail, "position:z", 5.0, 0.5)
+	# Phase 1: Engine powers up - trail grows bright
+	tween.tween_property(_warp_trail, "scale:z", 20.0, 0.8)
+	tween.parallel().tween_property(_warp_trail, "position:z", 6.0, 0.8)
 
-	# Phase 2: Ship takes off - flies up and to the right, stretches far beyond screen
-	tween.tween_property(self, "position:y", position.y + 200, 1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tween.parallel().tween_property(self, "position:z", position.z - 300, 1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tween.parallel().tween_property(self, "position:x", position.x + 60, 1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tween.parallel().tween_property(self, "scale:z", 8.0, 0.5)
+	# Phase 2: Ship shoots up into space and disappears off the top of the screen
+	tween.tween_property(self, "position:y", position.y + 500, 1.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
+	tween.parallel().tween_property(self, "position:z", position.z - 100, 1.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
 
+	# Brief pause then return to menu
+	tween.tween_interval(0.3)
 	tween.tween_callback(func(): warped.emit())
 
 func start_explosion():

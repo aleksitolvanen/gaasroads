@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://Scripts/ship.gd" id="1_script"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_col"]
-size = Vector3(1.8, 0.5, 2.0)
+size = Vector3(0.7, 0.3, 1.0)
 
 [node name="Ship" type="CharacterBody3D"]
 script = ExtResource("1_script")
