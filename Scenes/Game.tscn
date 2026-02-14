@@ -1,0 +1,18 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://Scenes/Ship.tscn" id="1_ship"]
+[ext_resource type="Script" path="res://Scripts/game.gd" id="2_game"]
+
+[node name="Game" type="Node3D"]
+script = ExtResource("2_game")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707, -0.707, 0, 0.707, 0.707, 0, 10, 0)
+
+[node name="Ship" parent="." instance=ExtResource("1_ship")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 1, 0)
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.94, -0.34, 0, 0.34, 0.94, 4, 5, 8)
+
+[node name="Level" type="Node3D" parent="."]
