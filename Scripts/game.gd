@@ -1,18 +1,19 @@
 extends Node3D
 
-@export var level_path := "res://Levels/level1.txt"
+var level_path: String
 
 const TILE_SIZE := 2.0
 const TILE_HEIGHT := 0.5
 
 var _fallback_level := [
-	"11111", "11111", "11111", "11111", "11111", "11111",
-	"11 11", "11 11", "11111", "11111", "1   1", "1   1",
-	"11111", "11111", "", "11111", "11111", "1 1 1", "1 1 1",
-	"11111", "11111", "  1  ", "  1  ", "  1  ", "11111",
-	"11111", "11311", "11311", "11111", "22222", "22222",
-	"11111", "11111", "1   1", "1   1", "1   1", "1   1",
-	"11111", "11111", "11111", "11411", "11111", "11111", "11111"
+	"1111111111", "1111111111", "1111111111", "1111111111",
+	"1111111111", "1111111111", "111    111", "111    111",
+	"1111111111", "1111111111", "1        1", "1        1",
+	"1111111111", "1111111111", "", "1111111111", "1111111111",
+	"1111111111", "  111111  ", "  111111  ", "1111111111",
+	"1111111111", "1113311111", "1113311111", "1111111111",
+	"2222222222", "2222222222", "1111111111", "1111111111",
+	"1111111111", "1111111111"
 ]
 
 var _camera: Camera3D
@@ -20,17 +21,42 @@ var _ship: CharacterBody3D
 var _bg_quad: MeshInstance3D
 var _speed_gauge: ProgressBar
 var _speed_label: Label
+var _hud_canvas: CanvasLayer
+var _level_end_z := -1000.0
+var _finishing := false
 
 func _ready():
+	level_path = GameState.selected_level
 	_ship = $Ship
+	_ship.frozen = false
+	_ship.current_speed = 12.0
+	_ship.warped.connect(_on_ship_warped)
+	_ship.exploded.connect(_on_ship_exploded)
+
+	match GameState.selected_group:
+		2: # Solar Burn - low gravity
+			_ship.gravity = 12.0
+			_ship.jump_velocity = 10.0
+		3: # Dark Matter - very low gravity, high jumps
+			_ship.gravity = 8.0
+			_ship.jump_velocity = 12.0
 	_camera = $Camera3D
 	_create_space_environment()
 	_create_hud()
 	_load_level()
 
 func _process(_delta):
+	if Input.is_action_just_pressed("ui_cancel"):
+		get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
+		return
+
 	var ship_pos := _ship.global_position
-	_camera.global_position = Vector3(ship_pos.x, ship_pos.y + 2.5, ship_pos.z + 3.5)
+
+	if not _finishing and ship_pos.z < _level_end_z - 5.0:
+		_finishing = true
+		_ship.start_warp()
+
+	_camera.global_position = Vector3(ship_pos.x, ship_pos.y + 2.5, ship_pos.z + 4.2)
 	_camera.look_at(ship_pos + Vector3(0, -1.5, -6), Vector3.UP)
 
 	if _bg_quad:
@@ -41,6 +67,7 @@ func _process(_delta):
 
 func _create_hud():
 	var canvas := CanvasLayer.new()
+	_hud_canvas = canvas
 	add_child(canvas)
 
 	if ResourceLoader.exists("res://cockpit.png"):
@@ -119,13 +146,20 @@ func _create_space_environment():
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.0, 0.0, 0.0)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.15, 0.12, 0.2)
-	env.ambient_light_energy = 0.3
+	env.ambient_light_color = Color(0.3, 0.25, 0.4)
+	env.ambient_light_energy = 0.8
 
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
 
+	match GameState.selected_group:
+		1:
+			_create_nebula_background()
+		_:
+			_create_image_background()
+
+func _create_image_background():
 	if ResourceLoader.exists("res://background.png"):
 		_bg_quad = MeshInstance3D.new()
 		var quad_mesh := QuadMesh.new()
@@ -138,6 +172,70 @@ func _create_space_environment():
 		_bg_quad.mesh = quad_mesh
 		add_child(_bg_quad)
 
+func _create_nebula_background():
+	# Stars via MultiMesh
+	var star_mesh := QuadMesh.new()
+	star_mesh.size = Vector2(0.3, 0.3)
+	var star_mat := StandardMaterial3D.new()
+	star_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	star_mat.albedo_color = Color.WHITE
+	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	star_mesh.material = star_mat
+
+	var multi_mesh := MultiMesh.new()
+	multi_mesh.transform_format = MultiMesh.TRANSFORM_3D
+	multi_mesh.mesh = star_mesh
+	multi_mesh.instance_count = 1200
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 42
+	for i in 1200:
+		var pos := Vector3(
+			rng.randf_range(-150, 150),
+			rng.randf_range(-40, 100),
+			rng.randf_range(-400, 50)
+		)
+		var s := rng.randf_range(0.1, 0.6)
+		var t := Transform3D.IDENTITY.scaled(Vector3(s, s, s))
+		t.origin = pos
+		multi_mesh.set_instance_transform(i, t)
+
+	var star_instance := MultiMeshInstance3D.new()
+	star_instance.multimesh = multi_mesh
+	add_child(star_instance)
+
+	# Black hole sphere
+	var bh_mesh := SphereMesh.new()
+	bh_mesh.radius = 20.0
+	bh_mesh.height = 40.0
+	var bh_mat := StandardMaterial3D.new()
+	bh_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bh_mat.albedo_color = Color(0.0, 0.0, 0.01)
+	bh_mesh.material = bh_mat
+
+	var bh_instance := MeshInstance3D.new()
+	bh_instance.mesh = bh_mesh
+	bh_instance.position = Vector3(4, 15, -350)
+	add_child(bh_instance)
+
+	# Accretion disk
+	var disk_mesh := TorusMesh.new()
+	disk_mesh.inner_radius = 25.0
+	disk_mesh.outer_radius = 45.0
+	var disk_mat := StandardMaterial3D.new()
+	disk_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	disk_mat.albedo_color = Color(1.0, 0.5, 0.1)
+	disk_mat.emission_enabled = true
+	disk_mat.emission = Color(1.0, 0.4, 0.05)
+	disk_mat.emission_energy_multiplier = 2.0
+	disk_mesh.material = disk_mat
+
+	var disk_instance := MeshInstance3D.new()
+	disk_instance.mesh = disk_mesh
+	disk_instance.position = Vector3(4, 15, -350)
+	disk_instance.rotation_degrees = Vector3(75, 0, 15)
+	add_child(disk_instance)
+
 func _load_level():
 	var level_node := $Level
 	var content: String
@@ -149,6 +247,16 @@ func _load_level():
 	else:
 		printerr("Failed to open level file: %s - using built-in level" % level_path)
 		content = "\n".join(_fallback_level)
+		var warn := Label.new()
+		warn.text = "FALLBACK LEVEL - file not found: %s" % level_path
+		warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		warn.anchor_left = 0
+		warn.anchor_right = 1
+		warn.anchor_bottom = 1
+		warn.offset_top = -30
+		warn.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
+		warn.add_theme_font_size_override("font_size", 14)
+		_hud_canvas.add_child(warn)
 
 	var lines := content.split("\n")
 	var rows := lines.size()
@@ -156,6 +264,8 @@ func _load_level():
 	for line in lines:
 		if line.length() > cols:
 			cols = line.length()
+
+	_level_end_z = -(rows - 1) * TILE_SIZE
 
 	var grid: Array[Array] = []
 	for r in rows:
@@ -177,8 +287,24 @@ func _load_level():
 		row.fill(false)
 		used.append(row)
 
-	var tile_material := StandardMaterial3D.new()
-	tile_material.albedo_color = Color(0.3, 0.5, 0.8)
+	var group_colors := [
+		Color(0.4, 0.65, 1.0),   # Cosmic Highway - bright blue
+		Color(0.7, 0.4, 0.9),    # Nebula Run - bright purple
+		Color(1.0, 0.6, 0.25),   # Solar Burn - bright orange
+		Color(0.4, 0.9, 0.6),    # Dark Matter - bright green
+	]
+	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
+
+	var height_materials: Dictionary = {}
+	for h in range(1, 10):
+		var mat := StandardMaterial3D.new()
+		var brightness := 1.2 + (h - 1) * 0.1
+		mat.albedo_color = base_color * brightness
+		mat.albedo_color.a = 1.0
+		mat.emission_enabled = true
+		mat.emission = base_color * 0.3
+		mat.emission_energy_multiplier = 0.5
+		height_materials[h] = mat
 
 	for r in rows:
 		for c in cols:
@@ -206,13 +332,20 @@ func _load_level():
 					used[rr][cc] = true
 
 			var actual_height := height * TILE_HEIGHT
-			var tile := _create_merged_tile(w, h, actual_height, tile_material)
+			var tile := _create_merged_tile(w, h, actual_height, height_materials[height])
 			tile.position = Vector3(
 				c * TILE_SIZE + (w - 1) * TILE_SIZE / 2.0,
 				actual_height / 2.0,
 				-r * TILE_SIZE - (h - 1) * TILE_SIZE / 2.0
 			)
 			level_node.add_child(tile)
+
+func _on_ship_warped():
+	GameState.mark_completed(GameState.selected_group, GameState.selected_track)
+	get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
+
+func _on_ship_exploded():
+	_ship.reset_ship()
 
 func _create_merged_tile(tiles_wide: int, tiles_deep: int, height: float, material: StandardMaterial3D) -> StaticBody3D:
 	var body := StaticBody3D.new()
