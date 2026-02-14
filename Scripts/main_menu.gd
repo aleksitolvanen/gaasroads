@@ -35,6 +35,7 @@ var _group_labels: Array[Label] = []
 func _ready():
 	_build_menu()
 	_update_selection()
+	Music.play_for_group(0)
 
 func _input(event):
 	if event.is_action_pressed("ui_right"):
@@ -152,6 +153,18 @@ func _build_menu():
 			group_box.add_child(track_label)
 			tracks.append(track_label)
 		_track_labels.append(tracks)
+
+	var music_hint := Label.new()
+	music_hint.text = "Press M to toggle music"
+	music_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	music_hint.anchor_left = 0
+	music_hint.anchor_right = 1
+	music_hint.anchor_top = 1
+	music_hint.anchor_bottom = 1
+	music_hint.offset_top = -50
+	music_hint.add_theme_color_override("font_color", Color(0.5, 0.5, 0.55))
+	music_hint.add_theme_font_size_override("font_size", 13)
+	add_child(music_hint)
 
 	var credit := Label.new()
 	credit.text = "Inspired by SkyRoads (1993)."

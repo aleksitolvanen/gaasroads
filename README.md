@@ -2,6 +2,8 @@
 
 A 3D space racing game heavily inspired by [SkyRoads](https://en.wikipedia.org/wiki/SkyRoads_(video_game)) (1993) by BlueMoon Interactive.
 
+This is a test project for recreating a classic game with GenAI (Claude Code).
+
 Built with Godot 4.6 (GDScript, GL Compatibility renderer).
 
 ## Play

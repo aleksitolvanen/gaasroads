@@ -50,6 +50,7 @@ func _ready():
 	_create_space_environment()
 	_create_hud()
 	_load_level()
+	Music.play_for_group(GameState.selected_group)
 
 func _process(delta):
 	if Input.is_action_just_pressed("ui_cancel"):
