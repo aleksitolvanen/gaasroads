@@ -4,16 +4,22 @@ var level_path: String
 
 const TILE_SIZE := 2.0
 const TILE_HEIGHT := 0.5
+const TUNNEL_CLEARANCE := 3.5
 
 var _fallback_level := [
-	"1111111111", "1111111111", "1111111111", "1111111111",
-	"1111111111", "1111111111", "111    111", "111    111",
-	"1111111111", "1111111111", "1        1", "1        1",
-	"1111111111", "1111111111", "", "1111111111", "1111111111",
-	"1111111111", "  111111  ", "  111111  ", "1111111111",
-	"1111111111", "1113311111", "1113311111", "1111111111",
-	"2222222222", "2222222222", "1111111111", "1111111111",
-	"1111111111", "1111111111"
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"1.1.1.......1.1.1.", "1.1.1.......1.1.1.",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"1...............1.", "1...............1.",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"1T1T1T1T1T1T1T1T1T1T", "1T1T1T1T1T1T1T1T1T1T",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"2.2.2.2.2.2.2.2.2.2.", "2.2.2.2.2.2.2.2.2.2.",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
+	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
 ]
 
 var _camera: Camera3D
@@ -30,6 +36,9 @@ var _mothership_active := false
 var _fighters: Array[Node3D] = []
 var _green_laser_mat: StandardMaterial3D
 var _red_laser_mat: StandardMaterial3D
+var _timer_label: Label
+var _timer_running := false
+var _endless_generated_rows := 0
 
 func _ready():
 	level_path = GameState.selected_level
@@ -47,13 +56,15 @@ func _ready():
 			_ship.gravity = 8.0
 			_ship.jump_velocity = 7.8
 	_camera = $Camera3D
+	GameState.elapsed_time = 0.0
+	_timer_running = false
 	_create_space_environment()
 	_create_hud()
 	_load_level()
 	Music.play_for_group(GameState.selected_group)
 
 func _process(delta):
-	if Input.is_action_just_pressed("ui_cancel"):
+	if Input.is_action_just_pressed("ui_cancel") or Input.is_physical_key_pressed(KEY_Q):
 		get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
 		return
 
@@ -66,7 +77,7 @@ func _process(delta):
 			_laser_timer = _laser_rng.randf_range(0.08, 0.25)
 			_spawn_laser(ship_pos)
 
-	if not _finishing and ship_pos.z < _level_end_z - 5.0:
+	if not GameState.is_endless and not _finishing and ship_pos.z < _level_end_z - 5.0:
 		_finishing = true
 		_ship.start_warp()
 		_create_warp_streaks()
@@ -83,6 +94,24 @@ func _process(delta):
 
 	_speed_gauge.value = _ship.current_speed
 	_speed_label.text = "%d" % _ship.current_speed
+
+	# Timer
+	if not _timer_running and _ship.current_speed > 0 and not _finishing:
+		_timer_running = true
+	if _timer_running and not _finishing:
+		GameState.elapsed_time += delta
+	if _timer_label:
+		if GameState.is_endless:
+			var dist := int(absf(ship_pos.z))
+			_timer_label.text = "%dm" % dist
+		else:
+			_timer_label.text = GameState.format_time(GameState.elapsed_time) if GameState.elapsed_time > 0.0 else "0:00.00"
+
+	# Endless mode: generate more chunks as player approaches end
+	if GameState.is_endless and not _finishing:
+		var dist_to_end := ship_pos.z - _level_end_z
+		if dist_to_end < 600:
+			_generate_endless_chunk()
 
 func _create_hud():
 	var canvas := CanvasLayer.new()
@@ -127,7 +156,7 @@ func _create_hud():
 
 	_speed_gauge = ProgressBar.new()
 	_speed_gauge.min_value = 0
-	_speed_gauge.max_value = 25
+	_speed_gauge.max_value = 30
 	_speed_gauge.value = 12
 	_speed_gauge.show_percentage = false
 	_speed_gauge.anchor_left = 0
@@ -160,17 +189,67 @@ func _create_hud():
 	_speed_label.add_theme_font_size_override("font_size", 14)
 	gauge_container.add_child(_speed_label)
 
+	# Timer display
+	_timer_label = Label.new()
+	_timer_label.text = "0:00.00"
+	_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_timer_label.anchor_left = 0.5
+	_timer_label.anchor_right = 0.5
+	_timer_label.offset_left = -60
+	_timer_label.offset_right = 60
+	_timer_label.offset_top = -72
+	_timer_label.offset_bottom = -55
+	_timer_label.anchor_top = 1
+	_timer_label.anchor_bottom = 1
+	_timer_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.85, 0.8))
+	_timer_label.add_theme_font_size_override("font_size", 14)
+	canvas.add_child(_timer_label)
+
 func _create_space_environment():
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.0, 0.0, 0.0)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.3, 0.25, 0.4)
-	env.ambient_light_energy = 0.8
+	match GameState.selected_group:
+		2:  # Solar - very dark ambient, sun does the work
+			env.ambient_light_color = Color(0.08, 0.06, 0.04)
+			env.ambient_light_energy = 0.3
+		1:  # Nebula
+			env.ambient_light_color = Color(0.12, 0.08, 0.15)
+			env.ambient_light_energy = 0.4
+		3:  # Dark Matter
+			env.ambient_light_color = Color(0.06, 0.1, 0.08)
+			env.ambient_light_energy = 0.3
+		_:  # Cosmic Highway
+			env.ambient_light_color = Color(0.08, 0.08, 0.12)
+			env.ambient_light_energy = 0.4
 
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
+
+	var sun := DirectionalLight3D.new()
+	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 60.0
+	var light_target := Vector3(5, 2, -50)
+	match GameState.selected_group:
+		1:  # Nebula - light from accretion ring at (4, 15, -350)
+			sun.basis = Basis.looking_at((light_target - Vector3(4, 15, -350)).normalized())
+			sun.light_color = Color(1.0, 0.6, 0.3)
+			sun.light_energy = 1.4
+		2:  # Solar - bright harsh sunlight from (-80, 55, -300)
+			sun.basis = Basis.looking_at((light_target - Vector3(-120, 80, -600)).normalized())
+			sun.light_color = Color(1.0, 0.85, 0.4)
+			sun.light_energy = 2.0
+		3:  # Dark Matter - eerie green from mothership at (30, 18, -350)
+			sun.basis = Basis.looking_at((light_target - Vector3(30, 18, -350)).normalized())
+			sun.light_color = Color(0.4, 0.8, 0.5)
+			sun.light_energy = 1.2
+		_:  # Cosmic Highway - cool starlight from upper-left
+			sun.basis = Basis.looking_at((light_target - Vector3(-30, 40, -200)).normalized())
+			sun.light_color = Color(0.8, 0.85, 1.0)
+			sun.light_energy = 1.0
+	add_child(sun)
 
 	match GameState.selected_group:
 		1:
@@ -205,18 +284,21 @@ func _create_nebula_background():
 	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	star_mesh.material = star_mat
 
+	var star_z_min := minf(-400, _level_end_z - 100)
+	var star_count := maxi(1200, int(absf(star_z_min) * 2))
+
 	var multi_mesh := MultiMesh.new()
 	multi_mesh.transform_format = MultiMesh.TRANSFORM_3D
 	multi_mesh.mesh = star_mesh
-	multi_mesh.instance_count = 1200
+	multi_mesh.instance_count = star_count
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 42
-	for i in 1200:
+	for i in star_count:
 		var pos := Vector3(
 			rng.randf_range(-150, 150),
 			rng.randf_range(-40, 100),
-			rng.randf_range(-400, 50)
+			rng.randf_range(star_z_min, 50)
 		)
 		var s := rng.randf_range(0.1, 0.6)
 		var t := Transform3D.IDENTITY.scaled(Vector3(s, s, s))
@@ -227,21 +309,7 @@ func _create_nebula_background():
 	star_instance.multimesh = multi_mesh
 	add_child(star_instance)
 
-	# Black hole sphere
-	var bh_mesh := SphereMesh.new()
-	bh_mesh.radius = 20.0
-	bh_mesh.height = 40.0
-	var bh_mat := StandardMaterial3D.new()
-	bh_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	bh_mat.albedo_color = Color(0.0, 0.0, 0.01)
-	bh_mesh.material = bh_mat
-
-	var bh_instance := MeshInstance3D.new()
-	bh_instance.mesh = bh_mesh
-	bh_instance.position = Vector3(4, 15, -350)
-	add_child(bh_instance)
-
-	# Accretion disk
+	# Main accretion ring - see-through center
 	var disk_mesh := TorusMesh.new()
 	disk_mesh.inner_radius = 25.0
 	disk_mesh.outer_radius = 45.0
@@ -251,6 +319,7 @@ func _create_nebula_background():
 	disk_mat.emission_enabled = true
 	disk_mat.emission = Color(1.0, 0.4, 0.05)
 	disk_mat.emission_energy_multiplier = 2.0
+	disk_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	disk_mesh.material = disk_mat
 
 	var disk_instance := MeshInstance3D.new()
@@ -258,6 +327,121 @@ func _create_nebula_background():
 	disk_instance.position = Vector3(4, 15, -350)
 	disk_instance.rotation_degrees = Vector3(75, 0, 15)
 	add_child(disk_instance)
+
+	# Rings along the track to fly through
+	var track_length := absf(_level_end_z)
+	var ring_spacing := 250.0
+	var ring_count := int(track_length / ring_spacing)
+
+	# Particle mesh for dust around rings
+	var dust_mesh := QuadMesh.new()
+	dust_mesh.size = Vector2(0.4, 0.4)
+	var dust_mat := StandardMaterial3D.new()
+	dust_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dust_mat.albedo_color = Color(1.0, 0.7, 0.3, 0.6)
+	dust_mat.emission_enabled = true
+	dust_mat.emission = Color(1.0, 0.6, 0.2)
+	dust_mat.emission_energy_multiplier = 2.0
+	dust_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dust_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	dust_mesh.material = dust_mat
+
+	for i in ring_count:
+		# Vary color per ring: orange / gold / pink / cyan
+		var hue := rng.randf_range(0.02, 0.15)
+		var sat := rng.randf_range(0.6, 1.0)
+		var ring_color := Color.from_hsv(hue, sat, 1.0)
+		var ring_emission := Color.from_hsv(hue, sat, 0.8)
+
+		var ring_mat := StandardMaterial3D.new()
+		ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ring_mat.albedo_color = ring_color
+		ring_mat.emission_enabled = true
+		ring_mat.emission = ring_emission
+		ring_mat.emission_energy_multiplier = 2.5
+		ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+		var inner := rng.randf_range(18.0, 30.0)
+		var outer := inner + rng.randf_range(3.0, 6.0)
+		var ring_root := Node3D.new()
+		ring_root.position = Vector3(
+			9.0 + rng.randf_range(-5.0, 5.0),
+			rng.randf_range(2.0, 7.0),
+			-(i + 1) * ring_spacing + rng.randf_range(-30, 30)
+		)
+		ring_root.rotation_degrees = Vector3(90 + rng.randf_range(-15, 15), rng.randf_range(-20, 20), rng.randf_range(-10, 10))
+		# Oblong stretch
+		var stretch := rng.randf_range(0.6, 1.0)
+		ring_root.scale = Vector3(1.0, stretch, 1.0) if rng.randf() < 0.5 else Vector3(stretch, 1.0, 1.0)
+		add_child(ring_root)
+
+		# Main ring
+		var ring := MeshInstance3D.new()
+		var ring_mesh := TorusMesh.new()
+		ring_mesh.inner_radius = inner
+		ring_mesh.outer_radius = outer
+		ring_mesh.material = ring_mat
+		ring.mesh = ring_mesh
+		ring_root.add_child(ring)
+
+		# Inner glow ring - thinner, brighter, slightly offset
+		var glow_ring := MeshInstance3D.new()
+		var glow_mesh := TorusMesh.new()
+		glow_mesh.inner_radius = inner - 1.0
+		glow_mesh.outer_radius = inner + 0.5
+		var glow_mat := StandardMaterial3D.new()
+		glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		glow_mat.albedo_color = Color(ring_color, 0.4)
+		glow_mat.emission_enabled = true
+		glow_mat.emission = ring_emission
+		glow_mat.emission_energy_multiplier = 4.0
+		glow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		glow_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		glow_mesh.material = glow_mat
+		glow_ring.mesh = glow_mesh
+		glow_ring.rotation_degrees = Vector3(rng.randf_range(-5, 5), rng.randf_range(-5, 5), 0)
+		ring_root.add_child(glow_ring)
+
+		# Haze sphere around ring center
+		var haze := MeshInstance3D.new()
+		var haze_mesh := SphereMesh.new()
+		var haze_r := outer * 1.2
+		haze_mesh.radius = haze_r
+		haze_mesh.height = haze_r * 2
+		var haze_mat := StandardMaterial3D.new()
+		haze_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		haze_mat.albedo_color = Color(ring_color, 0.04)
+		haze_mat.emission_enabled = true
+		haze_mat.emission = ring_emission
+		haze_mat.emission_energy_multiplier = 0.8
+		haze_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		haze_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		haze_mesh.material = haze_mat
+		haze.mesh = haze_mesh
+		ring_root.add_child(haze)
+
+		# OmniLight at ring center
+		var ring_light := OmniLight3D.new()
+		ring_light.light_color = ring_color
+		ring_light.light_energy = 0.6
+		ring_light.omni_range = outer * 1.2
+		ring_light.omni_attenuation = 2.0
+		ring_light.shadow_enabled = false
+		ring_root.add_child(ring_light)
+
+		# Dust particles scattered around the ring
+		var dust_count := rng.randi_range(12, 25)
+		for _j in dust_count:
+			var angle := rng.randf() * TAU
+			var r := rng.randf_range(inner * 0.7, outer * 1.1)
+			var dust := MeshInstance3D.new()
+			var dm := QuadMesh.new()
+			var ds := rng.randf_range(0.3, 0.8)
+			dm.size = Vector2(ds, ds)
+			dm.material = dust_mat
+			dust.mesh = dm
+			dust.position = Vector3(cos(angle) * r, sin(angle) * r, rng.randf_range(-2, 2))
+			ring_root.add_child(dust)
 
 func _create_solar_background():
 	# Scattered dim stars
@@ -269,18 +453,21 @@ func _create_solar_background():
 	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	star_mesh.material = star_mat
 
+	var solar_z_min := minf(-400, _level_end_z - 100)
+	var solar_star_count := maxi(400, int(absf(solar_z_min) * 0.8))
+
 	var multi_mesh := MultiMesh.new()
 	multi_mesh.transform_format = MultiMesh.TRANSFORM_3D
 	multi_mesh.mesh = star_mesh
-	multi_mesh.instance_count = 400
+	multi_mesh.instance_count = solar_star_count
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
-	for i in 400:
+	for i in solar_star_count:
 		var pos := Vector3(
 			rng.randf_range(-150, 150),
 			rng.randf_range(-30, 100),
-			rng.randf_range(-400, 50)
+			rng.randf_range(solar_z_min, 50)
 		)
 		var s := rng.randf_range(0.1, 0.4)
 		var t := Transform3D.IDENTITY.scaled(Vector3(s, s, s))
@@ -293,8 +480,8 @@ func _create_solar_background():
 
 	# Huge bright star - close and threatening
 	var sun_mesh := SphereMesh.new()
-	sun_mesh.radius = 60.0
-	sun_mesh.height = 120.0
+	sun_mesh.radius = 90.0
+	sun_mesh.height = 180.0
 	var sun_mat := StandardMaterial3D.new()
 	sun_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sun_mat.albedo_color = Color(1.0, 0.85, 0.4)
@@ -303,15 +490,24 @@ func _create_solar_background():
 	sun_mat.emission_energy_multiplier = 3.0
 	sun_mesh.material = sun_mat
 
-	var sun := MeshInstance3D.new()
-	sun.mesh = sun_mesh
-	sun.position = Vector3(-40, 30, -250)
-	add_child(sun)
+	var sun_obj := MeshInstance3D.new()
+	sun_obj.mesh = sun_mesh
+	sun_obj.position = Vector3(-120, 80, -600)
+	add_child(sun_obj)
+
+	var sun_light := OmniLight3D.new()
+	sun_light.position = Vector3(-120, 80, -600)
+	sun_light.light_color = Color(1.0, 0.8, 0.4)
+	sun_light.light_energy = 0.8
+	sun_light.omni_range = 150.0
+	sun_light.omni_attenuation = 1.5
+	sun_light.shadow_enabled = false
+	add_child(sun_light)
 
 	# Inner corona ring - tight glow
 	var corona_mesh := TorusMesh.new()
-	corona_mesh.inner_radius = 58.0
-	corona_mesh.outer_radius = 80.0
+	corona_mesh.inner_radius = 88.0
+	corona_mesh.outer_radius = 120.0
 	var corona_mat := StandardMaterial3D.new()
 	corona_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	corona_mat.albedo_color = Color(1.0, 0.6, 0.1, 0.6)
@@ -323,14 +519,14 @@ func _create_solar_background():
 
 	var corona := MeshInstance3D.new()
 	corona.mesh = corona_mesh
-	corona.position = Vector3(-40, 30, -250)
+	corona.position = Vector3(-120, 80, -600)
 	corona.rotation_degrees = Vector3(rng.randf_range(-20, 20), rng.randf_range(-10, 10), 0)
 	add_child(corona)
 
 	# Outer haze - big soft glow
 	var haze_mesh := SphereMesh.new()
-	haze_mesh.radius = 100.0
-	haze_mesh.height = 200.0
+	haze_mesh.radius = 140.0
+	haze_mesh.height = 280.0
 	var haze_mat := StandardMaterial3D.new()
 	haze_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	haze_mat.albedo_color = Color(1.0, 0.5, 0.1, 0.12)
@@ -343,7 +539,7 @@ func _create_solar_background():
 
 	var haze := MeshInstance3D.new()
 	haze.mesh = haze_mesh
-	haze.position = Vector3(-40, 30, -250)
+	haze.position = Vector3(-120, 80, -600)
 	add_child(haze)
 
 func _create_dark_matter_background():
@@ -378,16 +574,19 @@ func _create_dark_matter_background():
 	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	star_mesh.material = star_mat
 
+	var dark_z_min := minf(-500, _level_end_z - 100)
+	var dark_star_count := maxi(500, int(absf(dark_z_min)))
+
 	var multi_mesh := MultiMesh.new()
 	multi_mesh.transform_format = MultiMesh.TRANSFORM_3D
 	multi_mesh.mesh = star_mesh
-	multi_mesh.instance_count = 500
+	multi_mesh.instance_count = dark_star_count
 
-	for i in 500:
+	for i in dark_star_count:
 		var pos := Vector3(
 			rng.randf_range(-200, 200),
 			rng.randf_range(-50, 120),
-			rng.randf_range(-500, 50)
+			rng.randf_range(dark_z_min, 50)
 		)
 		var s := rng.randf_range(0.05, 0.4)
 		var t := Transform3D.IDENTITY.scaled(Vector3(s, s, s))
@@ -420,250 +619,31 @@ func _create_dark_matter_background():
 	red_glow_mat.emission = Color(0.9, 0.1, 0.05)
 	red_glow_mat.emission_energy_multiplier = 2.5
 
-	var ship_root := Node3D.new()
-	ship_root.position = Vector3(30, 18, -350)
-	ship_root.rotation_degrees = Vector3(5, -25, 8)
-	add_child(ship_root)
+	# Spawn mothership groups along the track
+	var track_length := absf(_level_end_z)
+	var fleet_spacing := 400.0
+	var fleet_count := maxi(1, int(track_length / fleet_spacing))
 
-	# Main hull - elongated flat disc
-	var hull := MeshInstance3D.new()
-	var hull_mesh := CylinderMesh.new()
-	hull_mesh.top_radius = 25.0
-	hull_mesh.bottom_radius = 28.0
-	hull_mesh.height = 6.0
-	hull_mesh.material = hull_mat
-	hull.mesh = hull_mesh
-	ship_root.add_child(hull)
+	for fi in fleet_count:
+		var fleet_z := -200.0 - fi * fleet_spacing
+		var fleet_x := rng.randf_range(-50, 50)
+		var fleet_y := rng.randf_range(15, 30)
 
-	# Bridge tower on top
-	var bridge := MeshInstance3D.new()
-	var bridge_mesh := CylinderMesh.new()
-	bridge_mesh.top_radius = 6.0
-	bridge_mesh.bottom_radius = 10.0
-	bridge_mesh.height = 10.0
-	bridge_mesh.material = hull_mat
-	bridge.mesh = bridge_mesh
-	bridge.position = Vector3(0, 8, 0)
-	ship_root.add_child(bridge)
+		var ship_root := Node3D.new()
+		ship_root.position = Vector3(fleet_x, fleet_y, fleet_z)
+		ship_root.rotation_degrees = Vector3(rng.randf_range(-5, 8), rng.randf_range(-35, -15), rng.randf_range(-10, 10))
+		add_child(ship_root)
 
-	# Bridge dome
-	var dome := MeshInstance3D.new()
-	var dome_mesh := SphereMesh.new()
-	dome_mesh.radius = 6.5
-	dome_mesh.height = 7.0
-	dome_mesh.material = hull_mat
-	dome.mesh = dome_mesh
-	dome.position = Vector3(0, 13, 0)
-	ship_root.add_child(dome)
+		var mothership_light := OmniLight3D.new()
+		mothership_light.position = Vector3(fleet_x, fleet_y, fleet_z)
+		mothership_light.light_color = Color(0.3, 0.9, 0.5)
+		mothership_light.light_energy = 0.6
+		mothership_light.omni_range = 100.0
+		mothership_light.omni_attenuation = 2.0
+		mothership_light.shadow_enabled = false
+		add_child(mothership_light)
 
-	# Forward prong - left
-	var prong_mesh := BoxMesh.new()
-	prong_mesh.size = Vector3(3.0, 2.0, 35.0)
-	prong_mesh.material = hull_mat
-
-	var prong_l := MeshInstance3D.new()
-	prong_l.mesh = prong_mesh
-	prong_l.position = Vector3(-8, -1, -25)
-	ship_root.add_child(prong_l)
-
-	# Forward prong - right
-	var prong_r := MeshInstance3D.new()
-	prong_r.mesh = prong_mesh
-	prong_r.position = Vector3(8, -1, -25)
-	ship_root.add_child(prong_r)
-
-	# Engine block rear
-	var engine_block := MeshInstance3D.new()
-	var engine_mesh := BoxMesh.new()
-	engine_mesh.size = Vector3(18.0, 5.0, 12.0)
-	engine_mesh.material = hull_mat
-	engine_block.mesh = engine_mesh
-	engine_block.position = Vector3(0, -1, 22)
-	ship_root.add_child(engine_block)
-
-	# Green glow strips along the hull underside
-	var strip_mesh := BoxMesh.new()
-	strip_mesh.size = Vector3(20.0, 0.3, 1.0)
-	strip_mesh.material = glow_mat
-
-	for z_off in [-10.0, -3.0, 4.0, 11.0]:
-		var strip := MeshInstance3D.new()
-		strip.mesh = strip_mesh
-		strip.position = Vector3(0, -3.2, z_off)
-		ship_root.add_child(strip)
-
-	# Green glow on prong tips
-	var tip_mesh := BoxMesh.new()
-	tip_mesh.size = Vector3(2.0, 1.5, 2.0)
-	tip_mesh.material = glow_mat
-
-	var tip_l := MeshInstance3D.new()
-	tip_l.mesh = tip_mesh
-	tip_l.position = Vector3(-8, -1, -43)
-	ship_root.add_child(tip_l)
-
-	var tip_r := MeshInstance3D.new()
-	tip_r.mesh = tip_mesh
-	tip_r.position = Vector3(8, -1, -43)
-	ship_root.add_child(tip_r)
-
-	# Red engine glows at the rear
-	var engine_glow_mesh := CylinderMesh.new()
-	engine_glow_mesh.top_radius = 2.0
-	engine_glow_mesh.bottom_radius = 2.5
-	engine_glow_mesh.height = 1.5
-	engine_glow_mesh.material = red_glow_mat
-
-	for x_off in [-5.0, 0.0, 5.0]:
-		var eg := MeshInstance3D.new()
-		eg.mesh = engine_glow_mesh
-		eg.position = Vector3(x_off, -1, 28.5)
-		eg.rotation_degrees = Vector3(90, 0, 0)
-		ship_root.add_child(eg)
-
-	# Bridge window glow
-	var window_mesh := BoxMesh.new()
-	window_mesh.size = Vector3(8.0, 1.5, 0.3)
-	window_mesh.material = glow_mat
-
-	var window := MeshInstance3D.new()
-	window.mesh = window_mesh
-	window.position = Vector3(0, 12, -6.5)
-	ship_root.add_child(window)
-
-	# Eerie ambient glow surrounding the whole ship
-	var aura_mesh := SphereMesh.new()
-	aura_mesh.radius = 55.0
-	aura_mesh.height = 110.0
-	var aura_mat := StandardMaterial3D.new()
-	aura_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	aura_mat.albedo_color = Color(0.1, 0.25, 0.15, 0.04)
-	aura_mat.emission_enabled = true
-	aura_mat.emission = Color(0.05, 0.15, 0.1)
-	aura_mat.emission_energy_multiplier = 1.0
-	aura_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	aura_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	aura_mesh.material = aura_mat
-
-	var aura := MeshInstance3D.new()
-	aura.mesh = aura_mesh
-	aura.position = Vector3(0, 5, 0)
-	ship_root.add_child(aura)
-
-	# Close escort ships around the mothership with blinking lights
-	var escort_hull_mat := StandardMaterial3D.new()
-	escort_hull_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	escort_hull_mat.albedo_color = Color(0.2, 0.18, 0.25)
-	escort_hull_mat.emission_enabled = true
-	escort_hull_mat.emission = Color(0.08, 0.06, 0.12)
-	escort_hull_mat.emission_energy_multiplier = 1.0
-
-	var white_light_mat := StandardMaterial3D.new()
-	white_light_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	white_light_mat.albedo_color = Color(0.9, 0.95, 1.0)
-	white_light_mat.emission_enabled = true
-	white_light_mat.emission = Color(0.8, 0.9, 1.0)
-	white_light_mat.emission_energy_multiplier = 5.0
-
-	var orange_light_mat := StandardMaterial3D.new()
-	orange_light_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	orange_light_mat.albedo_color = Color(1.0, 0.6, 0.1)
-	orange_light_mat.emission_enabled = true
-	orange_light_mat.emission = Color(1.0, 0.5, 0.05)
-	orange_light_mat.emission_energy_multiplier = 4.0
-
-	var escort_positions := [
-		Vector3(-35, 5, 10),
-		Vector3(40, -3, -5),
-		Vector3(-15, 12, -20),
-		Vector3(50, 8, 15),
-		Vector3(-45, -2, -10),
-		Vector3(20, -6, 25),
-	]
-	var escort_rotations := [
-		Vector3(3, 15, -5),
-		Vector3(-5, -20, 3),
-		Vector3(8, 40, -2),
-		Vector3(-3, -10, 6),
-		Vector3(5, 30, -8),
-		Vector3(-6, -35, 4),
-	]
-
-	for i in escort_positions.size():
-		var escort := Node3D.new()
-		escort.position = escort_positions[i]
-		escort.rotation_degrees = escort_rotations[i]
-
-		# Tapered hull - bigger
-		var ehull := MeshInstance3D.new()
-		var ehull_mesh := CylinderMesh.new()
-		ehull_mesh.top_radius = 5.0
-		ehull_mesh.bottom_radius = 7.0
-		ehull_mesh.height = 2.0
-		ehull_mesh.material = escort_hull_mat
-		ehull.mesh = ehull_mesh
-		escort.add_child(ehull)
-
-		# Bridge bump
-		var ebridge := MeshInstance3D.new()
-		var ebridge_mesh := CylinderMesh.new()
-		ebridge_mesh.top_radius = 1.5
-		ebridge_mesh.bottom_radius = 2.2
-		ebridge_mesh.height = 1.8
-		ebridge_mesh.material = escort_hull_mat
-		ebridge.mesh = ebridge_mesh
-		ebridge.position = Vector3(0, 1.8, 0)
-		escort.add_child(ebridge)
-
-		# Forward spike
-		var spike := MeshInstance3D.new()
-		var spike_mesh := BoxMesh.new()
-		spike_mesh.size = Vector3(0.7, 0.5, 8.0)
-		spike_mesh.material = escort_hull_mat
-		spike.mesh = spike_mesh
-		spike.position = Vector3(0, -0.3, -8.0)
-		escort.add_child(spike)
-
-		# Navigation lights - bright white on tips
-		var light_mesh := BoxMesh.new()
-		light_mesh.size = Vector3(0.6, 0.6, 0.6)
-		light_mesh.material = white_light_mat
-
-		var lw1 := MeshInstance3D.new()
-		lw1.mesh = light_mesh
-		lw1.position = Vector3(-6.5, 0, 0)
-		escort.add_child(lw1)
-
-		var lw2 := MeshInstance3D.new()
-		lw2.mesh = light_mesh
-		lw2.position = Vector3(6.5, 0, 0)
-		escort.add_child(lw2)
-
-		# Orange lights underneath
-		var lo_mesh := BoxMesh.new()
-		lo_mesh.size = Vector3(0.7, 0.4, 0.7)
-		lo_mesh.material = orange_light_mat
-
-		var lo1 := MeshInstance3D.new()
-		lo1.mesh = lo_mesh
-		lo1.position = Vector3(0, -1.2, 3.0)
-		escort.add_child(lo1)
-
-		var lo2 := MeshInstance3D.new()
-		lo2.mesh = lo_mesh
-		lo2.position = Vector3(0, -1.2, -3.0)
-		escort.add_child(lo2)
-
-		# Engine glow at rear
-		var eeng := MeshInstance3D.new()
-		var eeng_mesh := BoxMesh.new()
-		eeng_mesh.size = Vector3(2.5, 0.8, 0.8)
-		eeng_mesh.material = glow_mat
-		eeng.mesh = eeng_mesh
-		eeng.position = Vector3(0, -0.2, 7.5)
-		escort.add_child(eeng)
-
-		ship_root.add_child(escort)
+		_build_mothership(ship_root, hull_mat, glow_mat, red_glow_mat, rng)
 
 	# Distant nebula wisps for depth
 	var wisp_mat := StandardMaterial3D.new()
@@ -744,16 +724,223 @@ func _create_dark_matter_background():
 		add_child(fighter)
 		_fighters.append(fighter)
 
-		# Initial positions: first 4 near mothership, last 4 will track player
+		# Initial positions: first 4 near first fleet, last 4 will track player
 		if i < 4:
 			fighter.global_position = Vector3(
-				30 + rng.randf_range(-20, 20),
-				35 + rng.randf_range(-8, 12),
-				-350 + rng.randf_range(-15, 15)
+				rng.randf_range(-20, 40),
+				rng.randf_range(25, 40),
+				-200 + rng.randf_range(-30, 30)
 			)
 			fighter.rotation_degrees = Vector3(
 				rng.randf_range(-10, 10), rng.randf_range(-30, 30), rng.randf_range(-5, 5)
 			)
+
+func _build_mothership(ship_root: Node3D, hull_mat: StandardMaterial3D, glow_mat: StandardMaterial3D, red_glow_mat: StandardMaterial3D, rng: RandomNumberGenerator):
+	var hull := MeshInstance3D.new()
+	var hull_mesh := CylinderMesh.new()
+	hull_mesh.top_radius = 25.0
+	hull_mesh.bottom_radius = 28.0
+	hull_mesh.height = 6.0
+	hull_mesh.material = hull_mat
+	hull.mesh = hull_mesh
+	ship_root.add_child(hull)
+
+	var bridge := MeshInstance3D.new()
+	var bridge_mesh := CylinderMesh.new()
+	bridge_mesh.top_radius = 6.0
+	bridge_mesh.bottom_radius = 10.0
+	bridge_mesh.height = 10.0
+	bridge_mesh.material = hull_mat
+	bridge.mesh = bridge_mesh
+	bridge.position = Vector3(0, 8, 0)
+	ship_root.add_child(bridge)
+
+	var dome := MeshInstance3D.new()
+	var dome_mesh := SphereMesh.new()
+	dome_mesh.radius = 6.5
+	dome_mesh.height = 7.0
+	dome_mesh.material = hull_mat
+	dome.mesh = dome_mesh
+	dome.position = Vector3(0, 13, 0)
+	ship_root.add_child(dome)
+
+	var prong_mesh := BoxMesh.new()
+	prong_mesh.size = Vector3(3.0, 2.0, 35.0)
+	prong_mesh.material = hull_mat
+	var prong_l := MeshInstance3D.new()
+	prong_l.mesh = prong_mesh
+	prong_l.position = Vector3(-8, -1, -25)
+	ship_root.add_child(prong_l)
+	var prong_r := MeshInstance3D.new()
+	prong_r.mesh = prong_mesh
+	prong_r.position = Vector3(8, -1, -25)
+	ship_root.add_child(prong_r)
+
+	var engine_block := MeshInstance3D.new()
+	var engine_mesh := BoxMesh.new()
+	engine_mesh.size = Vector3(18.0, 5.0, 12.0)
+	engine_mesh.material = hull_mat
+	engine_block.mesh = engine_mesh
+	engine_block.position = Vector3(0, -1, 22)
+	ship_root.add_child(engine_block)
+
+	var strip_mesh := BoxMesh.new()
+	strip_mesh.size = Vector3(20.0, 0.3, 1.0)
+	strip_mesh.material = glow_mat
+	for z_off in [-10.0, -3.0, 4.0, 11.0]:
+		var strip := MeshInstance3D.new()
+		strip.mesh = strip_mesh
+		strip.position = Vector3(0, -3.2, z_off)
+		ship_root.add_child(strip)
+
+	var tip_mesh := BoxMesh.new()
+	tip_mesh.size = Vector3(2.0, 1.5, 2.0)
+	tip_mesh.material = glow_mat
+	var tip_l := MeshInstance3D.new()
+	tip_l.mesh = tip_mesh
+	tip_l.position = Vector3(-8, -1, -43)
+	ship_root.add_child(tip_l)
+	var tip_r := MeshInstance3D.new()
+	tip_r.mesh = tip_mesh
+	tip_r.position = Vector3(8, -1, -43)
+	ship_root.add_child(tip_r)
+
+	var engine_glow_mesh := CylinderMesh.new()
+	engine_glow_mesh.top_radius = 2.0
+	engine_glow_mesh.bottom_radius = 2.5
+	engine_glow_mesh.height = 1.5
+	engine_glow_mesh.material = red_glow_mat
+	for x_off in [-5.0, 0.0, 5.0]:
+		var eg := MeshInstance3D.new()
+		eg.mesh = engine_glow_mesh
+		eg.position = Vector3(x_off, -1, 28.5)
+		eg.rotation_degrees = Vector3(90, 0, 0)
+		ship_root.add_child(eg)
+
+	var window_mesh := BoxMesh.new()
+	window_mesh.size = Vector3(8.0, 1.5, 0.3)
+	window_mesh.material = glow_mat
+	var window := MeshInstance3D.new()
+	window.mesh = window_mesh
+	window.position = Vector3(0, 12, -6.5)
+	ship_root.add_child(window)
+
+	var aura_mat := StandardMaterial3D.new()
+	aura_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	aura_mat.albedo_color = Color(0.1, 0.25, 0.15, 0.04)
+	aura_mat.emission_enabled = true
+	aura_mat.emission = Color(0.05, 0.15, 0.1)
+	aura_mat.emission_energy_multiplier = 1.0
+	aura_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	aura_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var aura_mesh := SphereMesh.new()
+	aura_mesh.radius = 55.0
+	aura_mesh.height = 110.0
+	aura_mesh.material = aura_mat
+	var aura := MeshInstance3D.new()
+	aura.mesh = aura_mesh
+	aura.position = Vector3(0, 5, 0)
+	ship_root.add_child(aura)
+
+	# Escort ships
+	var escort_hull_mat := StandardMaterial3D.new()
+	escort_hull_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	escort_hull_mat.albedo_color = Color(0.2, 0.18, 0.25)
+	escort_hull_mat.emission_enabled = true
+	escort_hull_mat.emission = Color(0.08, 0.06, 0.12)
+	escort_hull_mat.emission_energy_multiplier = 1.0
+
+	var white_light_mat := StandardMaterial3D.new()
+	white_light_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	white_light_mat.albedo_color = Color(0.9, 0.95, 1.0)
+	white_light_mat.emission_enabled = true
+	white_light_mat.emission = Color(0.8, 0.9, 1.0)
+	white_light_mat.emission_energy_multiplier = 5.0
+
+	var orange_light_mat := StandardMaterial3D.new()
+	orange_light_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	orange_light_mat.albedo_color = Color(1.0, 0.6, 0.1)
+	orange_light_mat.emission_enabled = true
+	orange_light_mat.emission = Color(1.0, 0.5, 0.05)
+	orange_light_mat.emission_energy_multiplier = 4.0
+
+	var escort_offsets := [
+		Vector3(-35, 5, 10), Vector3(40, -3, -5), Vector3(-15, 12, -20),
+		Vector3(50, 8, 15), Vector3(-45, -2, -10), Vector3(20, -6, 25),
+	]
+
+	for i in escort_offsets.size():
+		var escort := Node3D.new()
+		escort.position = escort_offsets[i]
+		escort.rotation_degrees = Vector3(rng.randf_range(-8, 8), rng.randf_range(-40, 40), rng.randf_range(-8, 8))
+
+		var ehull := MeshInstance3D.new()
+		var ehull_mesh := CylinderMesh.new()
+		ehull_mesh.top_radius = 5.0
+		ehull_mesh.bottom_radius = 7.0
+		ehull_mesh.height = 2.0
+		ehull_mesh.material = escort_hull_mat
+		ehull.mesh = ehull_mesh
+		escort.add_child(ehull)
+
+		var ebridge := MeshInstance3D.new()
+		var ebridge_mesh := CylinderMesh.new()
+		ebridge_mesh.top_radius = 1.5
+		ebridge_mesh.bottom_radius = 2.2
+		ebridge_mesh.height = 1.8
+		ebridge_mesh.material = escort_hull_mat
+		ebridge.mesh = ebridge_mesh
+		ebridge.position = Vector3(0, 1.8, 0)
+		escort.add_child(ebridge)
+
+		var spike := MeshInstance3D.new()
+		var spike_mesh := BoxMesh.new()
+		spike_mesh.size = Vector3(0.7, 0.5, 8.0)
+		spike_mesh.material = escort_hull_mat
+		spike.mesh = spike_mesh
+		spike.position = Vector3(0, -0.3, -8.0)
+		escort.add_child(spike)
+
+		var light_mesh := BoxMesh.new()
+		light_mesh.size = Vector3(0.6, 0.6, 0.6)
+		light_mesh.material = white_light_mat
+		var lw1 := MeshInstance3D.new()
+		lw1.mesh = light_mesh
+		lw1.position = Vector3(-6.5, 0, 0)
+		escort.add_child(lw1)
+		var lw2 := MeshInstance3D.new()
+		lw2.mesh = light_mesh
+		lw2.position = Vector3(6.5, 0, 0)
+		escort.add_child(lw2)
+
+		var lo_mesh := BoxMesh.new()
+		lo_mesh.size = Vector3(0.7, 0.4, 0.7)
+		lo_mesh.material = orange_light_mat
+		var lo1 := MeshInstance3D.new()
+		lo1.mesh = lo_mesh
+		lo1.position = Vector3(0, -1.2, 3.0)
+		escort.add_child(lo1)
+		var lo2 := MeshInstance3D.new()
+		lo2.mesh = lo_mesh
+		lo2.position = Vector3(0, -1.2, -3.0)
+		escort.add_child(lo2)
+
+		var eeng := MeshInstance3D.new()
+		var eeng_mesh := BoxMesh.new()
+		eeng_mesh.size = Vector3(2.5, 0.8, 0.8)
+		eeng_mesh.material = glow_mat
+		eeng.mesh = eeng_mesh
+		eeng.position = Vector3(0, -0.2, 7.5)
+		escort.add_child(eeng)
+
+		ship_root.add_child(escort)
+
+		# Slow drift animation
+		var drift := escort.create_tween().set_loops()
+		var drift_offset := Vector3(rng.randf_range(-8, 8), rng.randf_range(-4, 4), rng.randf_range(-6, 6))
+		var drift_time := rng.randf_range(8.0, 15.0)
+		drift.tween_property(escort, "position", escort_offsets[i] + drift_offset, drift_time).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		drift.tween_property(escort, "position", escort_offsets[i], drift_time).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 func _update_fighters(ship_pos: Vector3):
 	# Fighters 4-7 orbit far from the player - visible but distant
@@ -830,11 +1017,15 @@ func _load_level():
 	var level_node := $Level
 	var content: String
 
-	var file := FileAccess.open(level_path, FileAccess.READ)
-	if file:
-		content = file.get_as_text()
-		file.close()
+	if GameState.generated_content != "":
+		content = GameState.generated_content
 	else:
+		var file := FileAccess.open(level_path, FileAccess.READ)
+		if file:
+			content = file.get_as_text()
+			file.close()
+
+	if content == "":
 		printerr("Failed to open level file: %s - using built-in level" % level_path)
 		content = "\n".join(_fallback_level)
 		var warn := Label.new()
@@ -848,40 +1039,59 @@ func _load_level():
 		warn.add_theme_font_size_override("font_size", 14)
 		_hud_canvas.add_child(warn)
 
-	var lines := content.split("\n")
+	# Prepend a flat runway before the level content
+	var runway_row := "..".repeat(2) + "1.".repeat(6) + "..".repeat(2)
+	var runway_lines := PackedStringArray()
+	for _i in 24:
+		runway_lines.append(runway_row)
+
+	var lines := runway_lines + content.split("\n")
+	# Remove trailing empty lines
+	while lines.size() > 0 and lines[-1].strip_edges() == "":
+		lines.remove_at(lines.size() - 1)
 	var rows := lines.size()
+
+	# Parse 2-char tile format: each tile = [height_char][modifier_char]
 	var cols := 0
 	for line in lines:
-		if line.length() > cols:
-			cols = line.length()
+		var c := line.length() / 2
+		if c > cols:
+			cols = c
 
 	_level_end_z = -(rows - 1) * TILE_SIZE
+	if GameState.is_endless:
+		_endless_generated_rows = rows - 24  # subtract runway
 
 	var grid: Array[Array] = []
+	var tunnels: Array[Array] = []
 	for r in rows:
-		var row: Array[int] = []
-		row.resize(cols)
-		row.fill(0)
-		for c in lines[r].length():
-			var ch := lines[r][c]
-			if ch >= "1" and ch <= "9":
-				row[c] = ch.unicode_at(0) - "0".unicode_at(0)
-			elif ch == "#":
-				row[c] = 1
-		grid.append(row)
+		var floor_row: Array[int] = []
+		floor_row.resize(cols)
+		floor_row.fill(0)
+		var tunnel_row: Array[bool] = []
+		tunnel_row.resize(cols)
+		tunnel_row.fill(false)
 
-	var used: Array[Array] = []
-	for r in rows:
-		var row: Array[bool] = []
-		row.resize(cols)
-		row.fill(false)
-		used.append(row)
+		var line := lines[r]
+		for ci in range(0, line.length(), 2):
+			var tile_idx := ci / 2
+			if tile_idx >= cols:
+				break
+			var h_char := line[ci]
+			var m_char := line[ci + 1] if ci + 1 < line.length() else "."
+			if h_char >= "1" and h_char <= "9":
+				floor_row[tile_idx] = h_char.unicode_at(0) - "0".unicode_at(0)
+			# '.' or ' ' as height char = gap (height stays 0)
+			if m_char == "T" or m_char == "t":
+				tunnel_row[tile_idx] = true
+		grid.append(floor_row)
+		tunnels.append(tunnel_row)
 
 	var group_colors := [
-		Color(0.4, 0.65, 1.0),   # Cosmic Highway - bright blue
-		Color(0.7, 0.4, 0.9),    # Nebula Run - bright purple
-		Color(1.0, 0.6, 0.25),   # Solar Burn - bright orange
-		Color(0.4, 0.9, 0.6),    # Dark Matter - bright green
+		Color(0.4, 0.65, 1.0),
+		Color(0.7, 0.4, 0.9),
+		Color(1.0, 0.6, 0.25),
+		Color(0.4, 0.9, 0.6),
 	]
 	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
 
@@ -895,6 +1105,22 @@ func _load_level():
 		mat.emission = base_color * 0.3
 		mat.emission_energy_multiplier = 0.5
 		height_materials[h] = mat
+
+	# Tunnel ceiling material - darker variant
+	var ceil_mat := StandardMaterial3D.new()
+	ceil_mat.albedo_color = base_color.darkened(0.3)
+	ceil_mat.albedo_color.a = 1.0
+	ceil_mat.emission_enabled = true
+	ceil_mat.emission = base_color * 0.15
+	ceil_mat.emission_energy_multiplier = 0.3
+
+	# Greedy-merge floor tiles
+	var used: Array[Array] = []
+	for r in rows:
+		var row: Array[bool] = []
+		row.resize(cols)
+		row.fill(false)
+		used.append(row)
 
 	for r in rows:
 		for c in cols:
@@ -929,6 +1155,350 @@ func _load_level():
 				-r * TILE_SIZE - (h - 1) * TILE_SIZE / 2.0
 			)
 			level_node.add_child(tile)
+
+	# Build arched tunnels — merge consecutive tunnel rows at same column/height
+	var t_used: Array[Array] = []
+	for r in rows:
+		var row: Array[bool] = []
+		row.resize(cols)
+		row.fill(false)
+		t_used.append(row)
+
+	var tunnel_wall_mat := StandardMaterial3D.new()
+	tunnel_wall_mat.albedo_color = base_color.darkened(0.4)
+	tunnel_wall_mat.emission_enabled = true
+	tunnel_wall_mat.emission = base_color * 0.1
+	tunnel_wall_mat.emission_energy_multiplier = 0.3
+	tunnel_wall_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	for r in rows:
+		for c in cols:
+			if not tunnels[r][c] or t_used[r][c] or grid[r][c] == 0:
+				continue
+			var floor_h: int = grid[r][c]
+			# Merge along Z (consecutive rows, same column and height)
+			var depth := 0
+			while r + depth < rows and tunnels[r + depth][c] and grid[r + depth][c] == floor_h and not t_used[r + depth][c]:
+				depth += 1
+			for rr in range(r, r + depth):
+				t_used[rr][c] = true
+
+			var base_y := floor_h * TILE_HEIGHT
+			var arch_height := 1.2
+			var half_w := TILE_SIZE / 2.0
+			var wall_thickness := 0.06
+			var center_x := c * TILE_SIZE
+			var center_z := -r * TILE_SIZE - (depth - 1) * TILE_SIZE / 2.0
+			var tunnel_depth := depth * TILE_SIZE
+			var arch_segments := 24
+			var min_y := 0.1
+
+			# Build smooth half-cylinder with SurfaceTool
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var z_front := tunnel_depth / 2.0
+			var z_back := -tunnel_depth / 2.0
+
+			for seg in arch_segments:
+				var a0 := PI * float(seg) / float(arch_segments)
+				var a1 := PI * float(seg + 1) / float(arch_segments)
+				var x0 := -cos(a0) * half_w
+				var y0 := sin(a0) * arch_height
+				var x1 := -cos(a1) * half_w
+				var y1 := sin(a1) * arch_height
+				if y0 < min_y and y1 < min_y:
+					continue
+
+				# Normal at each point (pointing outward)
+				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
+				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
+
+				# Outer surface
+				var o0f := Vector3(x0, y0, z_front)
+				var o1f := Vector3(x1, y1, z_front)
+				var o0b := Vector3(x0, y0, z_back)
+				var o1b := Vector3(x1, y1, z_back)
+				# Inner surface (offset inward)
+				var i0f := o0f - n0 * wall_thickness
+				var i1f := o1f - n1 * wall_thickness
+				var i0b := o0b - n0 * wall_thickness
+				var i1b := o1b - n1 * wall_thickness
+
+				# Outer face (normals out)
+				st.set_normal(n0); st.add_vertex(o0f)
+				st.set_normal(n1); st.add_vertex(o1f)
+				st.set_normal(n0); st.add_vertex(o0b)
+				st.set_normal(n1); st.add_vertex(o1f)
+				st.set_normal(n1); st.add_vertex(o1b)
+				st.set_normal(n0); st.add_vertex(o0b)
+
+				# Inner face (normals in)
+				st.set_normal(-n0); st.add_vertex(i0b)
+				st.set_normal(-n1); st.add_vertex(i1f)
+				st.set_normal(-n0); st.add_vertex(i0f)
+				st.set_normal(-n0); st.add_vertex(i0b)
+				st.set_normal(-n1); st.add_vertex(i1b)
+				st.set_normal(-n1); st.add_vertex(i1f)
+
+			# Front and back cap rings
+			for seg in arch_segments:
+				var a0 := PI * float(seg) / float(arch_segments)
+				var a1 := PI * float(seg + 1) / float(arch_segments)
+				var x0 := -cos(a0) * half_w
+				var y0 := sin(a0) * arch_height
+				var x1 := -cos(a1) * half_w
+				var y1 := sin(a1) * arch_height
+				if y0 < min_y and y1 < min_y:
+					continue
+				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
+				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
+				var o0 := Vector3(x0, y0, 0)
+				var o1 := Vector3(x1, y1, 0)
+				var i0 := o0 - n0 * wall_thickness
+				var i1 := o1 - n1 * wall_thickness
+				# Front cap
+				var fz := Vector3(0, 0, z_front)
+				var fn := Vector3(0, 0, 1)
+				st.set_normal(fn); st.add_vertex(o0 + fz)
+				st.set_normal(fn); st.add_vertex(i1 + fz)
+				st.set_normal(fn); st.add_vertex(i0 + fz)
+				st.set_normal(fn); st.add_vertex(o0 + fz)
+				st.set_normal(fn); st.add_vertex(o1 + fz)
+				st.set_normal(fn); st.add_vertex(i1 + fz)
+				# Back cap
+				var bz := Vector3(0, 0, z_back)
+				var bn := Vector3(0, 0, -1)
+				st.set_normal(bn); st.add_vertex(i0 + bz)
+				st.set_normal(bn); st.add_vertex(i1 + bz)
+				st.set_normal(bn); st.add_vertex(o0 + bz)
+				st.set_normal(bn); st.add_vertex(o1 + bz)
+				st.set_normal(bn); st.add_vertex(o0 + bz)
+				st.set_normal(bn); st.add_vertex(i1 + bz)
+
+			var arch_mesh := st.commit()
+			arch_mesh.surface_set_material(0, tunnel_wall_mat)
+
+			var arch_body := StaticBody3D.new()
+			arch_body.set_meta("tunnel_wall", true)
+			var mesh_inst := MeshInstance3D.new()
+			mesh_inst.mesh = arch_mesh
+			arch_body.add_child(mesh_inst)
+
+			# Trimesh collision from the generated mesh
+			var trimesh_shape := arch_mesh.create_trimesh_shape()
+			var col_shape := CollisionShape3D.new()
+			col_shape.shape = trimesh_shape
+			arch_body.add_child(col_shape)
+
+			arch_body.position = Vector3(center_x, base_y, center_z)
+			level_node.add_child(arch_body)
+
+			# Invisible solid roof on top to prevent clipping through
+			var roof_body := StaticBody3D.new()
+			roof_body.set_meta("tunnel_wall", true)
+			var roof_col := CollisionShape3D.new()
+			var roof_box := BoxShape3D.new()
+			roof_box.size = Vector3(TILE_SIZE, 0.3, tunnel_depth)
+			roof_col.shape = roof_box
+			roof_body.add_child(roof_col)
+			roof_body.position = Vector3(center_x, base_y + arch_height + 0.15, center_z)
+			level_node.add_child(roof_body)
+
+func _generate_endless_chunk():
+	var params: Dictionary = GameState.endless_params.duplicate()
+	params["seed"] = randi()
+	params["length"] = 200
+	var content := LevelGenerator.generate(params)
+	var lines := content.split("\n")
+	while lines.size() > 0 and lines[-1].strip_edges() == "":
+		lines.remove_at(lines.size() - 1)
+
+	var level_node := $Level
+	var row_offset := _endless_generated_rows
+	var chunk_rows := lines.size()
+	_endless_generated_rows += chunk_rows
+	_level_end_z = -(_endless_generated_rows + 24) * TILE_SIZE
+
+	var cols := 10
+	var group_colors := [
+		Color(0.4, 0.65, 1.0), Color(0.7, 0.4, 0.9),
+		Color(1.0, 0.6, 0.25), Color(0.4, 0.9, 0.6),
+	]
+	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
+
+	var height_materials: Dictionary = {}
+	for h in range(1, 10):
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = base_color * (1.2 + (h - 1) * 0.1)
+		mat.albedo_color.a = 1.0
+		mat.emission_enabled = true
+		mat.emission = base_color * 0.3
+		mat.emission_energy_multiplier = 0.5
+		height_materials[h] = mat
+
+	var tunnel_wall_mat := StandardMaterial3D.new()
+	tunnel_wall_mat.albedo_color = base_color.darkened(0.4)
+	tunnel_wall_mat.emission_enabled = true
+	tunnel_wall_mat.emission = base_color * 0.1
+	tunnel_wall_mat.emission_energy_multiplier = 0.3
+	tunnel_wall_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	# Parse chunk
+	var grid: Array[Array] = []
+	var tunnels_arr: Array[Array] = []
+	for r in chunk_rows:
+		var floor_row: Array[int] = []
+		floor_row.resize(cols)
+		floor_row.fill(0)
+		var tunnel_row: Array[bool] = []
+		tunnel_row.resize(cols)
+		tunnel_row.fill(false)
+		var line := lines[r]
+		for ci in range(0, line.length(), 2):
+			var tile_idx := ci / 2
+			if tile_idx >= cols:
+				break
+			var h_char := line[ci]
+			var m_char := line[ci + 1] if ci + 1 < line.length() else "."
+			if h_char >= "1" and h_char <= "9":
+				floor_row[tile_idx] = h_char.unicode_at(0) - "0".unicode_at(0)
+			if m_char == "T" or m_char == "t":
+				tunnel_row[tile_idx] = true
+		grid.append(floor_row)
+		tunnels_arr.append(tunnel_row)
+
+	# Build floor tiles (simple per-tile, no greedy merge for chunks)
+	for r in chunk_rows:
+		for c in cols:
+			var height: int = grid[r][c]
+			if height == 0:
+				continue
+			var actual_height := height * TILE_HEIGHT
+			var tile := _create_merged_tile(1, 1, actual_height, height_materials[height])
+			tile.position = Vector3(
+				c * TILE_SIZE,
+				actual_height / 2.0,
+				-(row_offset + 24 + r) * TILE_SIZE
+			)
+			level_node.add_child(tile)
+
+	# Build tunnel arches
+	var t_used: Array[Array] = []
+	for r in chunk_rows:
+		var row: Array[bool] = []
+		row.resize(cols)
+		row.fill(false)
+		t_used.append(row)
+
+	for r in chunk_rows:
+		for c in cols:
+			if not tunnels_arr[r][c] or t_used[r][c] or grid[r][c] == 0:
+				continue
+			var floor_h: int = grid[r][c]
+			var depth := 0
+			while r + depth < chunk_rows and tunnels_arr[r + depth][c] and grid[r + depth][c] == floor_h and not t_used[r + depth][c]:
+				depth += 1
+			for rr in range(r, r + depth):
+				t_used[rr][c] = true
+
+			var base_y := floor_h * TILE_HEIGHT
+			var arch_height := 1.2
+			var half_w := TILE_SIZE / 2.0
+			var wall_thickness := 0.06
+			var center_x := c * TILE_SIZE
+			var center_z := -(row_offset + 24 + r) * TILE_SIZE - (depth - 1) * TILE_SIZE / 2.0
+			var tunnel_depth := depth * TILE_SIZE
+
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var z_front := tunnel_depth / 2.0
+			var z_back := -tunnel_depth / 2.0
+			var arch_segments := 24
+			var min_y := 0.1
+			for seg in arch_segments:
+				var a0 := PI * float(seg) / float(arch_segments)
+				var a1 := PI * float(seg + 1) / float(arch_segments)
+				var x0 := -cos(a0) * half_w
+				var y0 := sin(a0) * arch_height
+				var x1 := -cos(a1) * half_w
+				var y1 := sin(a1) * arch_height
+				if y0 < min_y and y1 < min_y:
+					continue
+				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
+				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
+				var o0f := Vector3(x0, y0, z_front)
+				var o1f := Vector3(x1, y1, z_front)
+				var o0b := Vector3(x0, y0, z_back)
+				var o1b := Vector3(x1, y1, z_back)
+				var i0f := o0f - n0 * wall_thickness
+				var i1f := o1f - n1 * wall_thickness
+				var i0b := o0b - n0 * wall_thickness
+				var i1b := o1b - n1 * wall_thickness
+				st.set_normal(n0); st.add_vertex(o0f)
+				st.set_normal(n1); st.add_vertex(o1f)
+				st.set_normal(n0); st.add_vertex(o0b)
+				st.set_normal(n1); st.add_vertex(o1f)
+				st.set_normal(n1); st.add_vertex(o1b)
+				st.set_normal(n0); st.add_vertex(o0b)
+				st.set_normal(-n0); st.add_vertex(i0b)
+				st.set_normal(-n1); st.add_vertex(i1f)
+				st.set_normal(-n0); st.add_vertex(i0f)
+				st.set_normal(-n0); st.add_vertex(i0b)
+				st.set_normal(-n1); st.add_vertex(i1b)
+				st.set_normal(-n1); st.add_vertex(i1f)
+			for seg in arch_segments:
+				var a0 := PI * float(seg) / float(arch_segments)
+				var a1 := PI * float(seg + 1) / float(arch_segments)
+				var x0 := -cos(a0) * half_w
+				var y0 := sin(a0) * arch_height
+				var x1 := -cos(a1) * half_w
+				var y1 := sin(a1) * arch_height
+				if y0 < min_y and y1 < min_y:
+					continue
+				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
+				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
+				var o0 := Vector3(x0, y0, 0)
+				var o1 := Vector3(x1, y1, 0)
+				var i0 := o0 - n0 * wall_thickness
+				var i1 := o1 - n1 * wall_thickness
+				var fz := Vector3(0, 0, z_front)
+				var fn := Vector3(0, 0, 1)
+				st.set_normal(fn); st.add_vertex(o0 + fz)
+				st.set_normal(fn); st.add_vertex(i1 + fz)
+				st.set_normal(fn); st.add_vertex(i0 + fz)
+				st.set_normal(fn); st.add_vertex(o0 + fz)
+				st.set_normal(fn); st.add_vertex(o1 + fz)
+				st.set_normal(fn); st.add_vertex(i1 + fz)
+				var bz := Vector3(0, 0, z_back)
+				var bn := Vector3(0, 0, -1)
+				st.set_normal(bn); st.add_vertex(i0 + bz)
+				st.set_normal(bn); st.add_vertex(i1 + bz)
+				st.set_normal(bn); st.add_vertex(o0 + bz)
+				st.set_normal(bn); st.add_vertex(o1 + bz)
+				st.set_normal(bn); st.add_vertex(o0 + bz)
+				st.set_normal(bn); st.add_vertex(i1 + bz)
+			var arch_mesh := st.commit()
+			arch_mesh.surface_set_material(0, tunnel_wall_mat)
+			var arch_body := StaticBody3D.new()
+			arch_body.set_meta("tunnel_wall", true)
+			var mesh_inst := MeshInstance3D.new()
+			mesh_inst.mesh = arch_mesh
+			arch_body.add_child(mesh_inst)
+			var trimesh_shape := arch_mesh.create_trimesh_shape()
+			var col_shape := CollisionShape3D.new()
+			col_shape.shape = trimesh_shape
+			arch_body.add_child(col_shape)
+			arch_body.position = Vector3(center_x, base_y, center_z)
+			level_node.add_child(arch_body)
+			var roof_body := StaticBody3D.new()
+			roof_body.set_meta("tunnel_wall", true)
+			var roof_col := CollisionShape3D.new()
+			var roof_box := BoxShape3D.new()
+			roof_box.size = Vector3(TILE_SIZE, 0.3, tunnel_depth)
+			roof_col.shape = roof_box
+			roof_body.add_child(roof_col)
+			roof_body.position = Vector3(center_x, base_y + arch_height + 0.15, center_z)
+			level_node.add_child(roof_body)
 
 func _create_warp_streaks():
 	var streak_mat := StandardMaterial3D.new()
@@ -967,10 +1537,17 @@ func _create_warp_streaks():
 		tween.tween_property(streak, "scale:z", stretch, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 func _on_ship_warped():
-	GameState.mark_completed(GameState.selected_group, GameState.selected_track)
+	if not GameState.is_endless:
+		GameState.mark_completed(GameState.menu_group, GameState.menu_track)
 	get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
 
 func _on_ship_exploded():
+	if GameState.is_endless:
+		# Save best distance before resetting
+		var dist := absf(_ship.global_position.z)
+		GameState.save_endless_best(dist)
+	GameState.elapsed_time = 0.0
+	_timer_running = false
 	_ship.reset_ship()
 
 func _create_merged_tile(tiles_wide: int, tiles_deep: int, height: float, material: StandardMaterial3D) -> StaticBody3D:
