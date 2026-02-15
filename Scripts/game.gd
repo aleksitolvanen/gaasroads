@@ -37,7 +37,11 @@ var _fighters: Array[Node3D] = []
 var _green_laser_mat: StandardMaterial3D
 var _red_laser_mat: StandardMaterial3D
 var _timer_label: Label
+var _share_panel: Control
+var _share_text: LineEdit
 var _timer_running := false
+var _share_open := false
+var _level_content := ""
 var _endless_generated_rows := 0
 
 func _ready():
@@ -64,6 +68,8 @@ func _ready():
 	Music.play_for_group(GameState.selected_group)
 
 func _process(delta):
+	if _share_open:
+		return
 	if Input.is_action_just_pressed("ui_cancel") or Input.is_physical_key_pressed(KEY_Q):
 		get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
 		return
@@ -188,6 +194,18 @@ func _create_hud():
 	_speed_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.5))
 	_speed_label.add_theme_font_size_override("font_size", 14)
 	gauge_container.add_child(_speed_label)
+
+	# Share hint
+	var share_hint := Label.new()
+	share_hint.text = "C: share track"
+	share_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	share_hint.anchor_left = 0
+	share_hint.anchor_top = 0
+	share_hint.offset_left = 10
+	share_hint.offset_top = 10
+	share_hint.add_theme_color_override("font_color", Color(0.5, 0.5, 0.55, 0.5))
+	share_hint.add_theme_font_size_override("font_size", 11)
+	canvas.add_child(share_hint)
 
 	# Timer display
 	_timer_label = Label.new()
@@ -1039,6 +1057,8 @@ func _load_level():
 		warn.add_theme_font_size_override("font_size", 14)
 		_hud_canvas.add_child(warn)
 
+	_level_content = content
+
 	# Prepend a flat runway before the level content
 	var runway_row := "..".repeat(2) + "1.".repeat(6) + "..".repeat(2)
 	var runway_lines := PackedStringArray()
@@ -1303,6 +1323,102 @@ func _load_level():
 			roof_body.add_child(roof_col)
 			roof_body.position = Vector3(center_x, base_y + arch_height + 0.15, center_z)
 			level_node.add_child(roof_body)
+
+func _unhandled_input(event):
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_C and not _finishing:
+			if _share_open:
+				_close_share_dialog()
+			else:
+				_open_share_dialog()
+		elif event.keycode == KEY_ESCAPE and _share_open:
+			_close_share_dialog()
+			get_viewport().set_input_as_handled()
+
+func _open_share_dialog():
+	_share_open = true
+	get_tree().paused = true
+
+	var panel := ColorRect.new()
+	panel.color = Color(0, 0, 0, 0.85)
+	panel.anchor_right = 1
+	panel.anchor_bottom = 1
+	panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_share_panel = panel
+	_hud_canvas.add_child(panel)
+
+	var title := Label.new()
+	title.text = "SHARE TRACK"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.anchor_left = 0.1
+	title.anchor_right = 0.9
+	title.offset_top = 20
+	title.add_theme_color_override("font_color", Color(0.9, 0.8, 0.5))
+	title.add_theme_font_size_override("font_size", 20)
+	panel.add_child(title)
+
+	var hint := Label.new()
+	hint.text = "Select all and copy the level data below. Press Esc or C to close."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.anchor_left = 0.1
+	hint.anchor_right = 0.9
+	hint.offset_top = 50
+	hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.65))
+	hint.add_theme_font_size_override("font_size", 12)
+	panel.add_child(hint)
+
+	_share_text = LineEdit.new()
+	_share_text.text = _level_content
+	_share_text.anchor_left = 0.05
+	_share_text.anchor_right = 0.95
+	_share_text.offset_top = 80
+	_share_text.offset_bottom = 105
+	_share_text.add_theme_font_size_override("font_size", 11)
+	_share_text.process_mode = Node.PROCESS_MODE_ALWAYS
+	_share_text.focus_mode = Control.FOCUS_NONE
+	panel.add_child(_share_text)
+	_share_text.select_all.call_deferred()
+
+	# Copy button
+	var copy_btn := Button.new()
+	copy_btn.text = "Copy to Clipboard"
+	copy_btn.anchor_left = 0.35
+	copy_btn.anchor_right = 0.65
+	copy_btn.offset_top = 115
+	copy_btn.offset_bottom = 143
+	copy_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	copy_btn.pressed.connect(_on_copy_pressed.bind(copy_btn))
+	panel.add_child(copy_btn)
+
+	# Continue button
+	var continue_btn := Button.new()
+	continue_btn.text = "Continue"
+	continue_btn.anchor_left = 0.35
+	continue_btn.anchor_right = 0.65
+	continue_btn.offset_top = 153
+	continue_btn.offset_bottom = 181
+	continue_btn.process_mode = Node.PROCESS_MODE_ALWAYS
+	continue_btn.pressed.connect(_close_share_dialog)
+	panel.add_child(continue_btn)
+
+	# Set up focus navigation between buttons
+	copy_btn.focus_neighbor_bottom = continue_btn.get_path()
+	copy_btn.focus_neighbor_top = continue_btn.get_path()
+	continue_btn.focus_neighbor_bottom = copy_btn.get_path()
+	continue_btn.focus_neighbor_top = copy_btn.get_path()
+	copy_btn.grab_focus.call_deferred()
+
+func _on_copy_pressed(btn: Button):
+	DisplayServer.clipboard_set(_level_content)
+	btn.text = "Copied!"
+
+func _close_share_dialog():
+	_share_open = false
+	get_tree().paused = false
+	if _share_panel:
+		_share_panel.queue_free()
+		_share_panel = null
+		_share_text = null
 
 func _generate_endless_chunk():
 	var params: Dictionary = GameState.endless_params.duplicate()

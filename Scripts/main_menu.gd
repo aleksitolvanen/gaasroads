@@ -114,6 +114,13 @@ func _input(event):
 	elif event.is_action_pressed("ui_accept"):
 		_start_game()
 
+	# V to paste and play a shared track
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_V:
+		_import_share_code()
+	# L to load track from file
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_L:
+		_open_load_dialog()
+
 	# Z/X to adjust custom parameters
 	if _group == 5 and event is InputEventKey and event.pressed and not event.echo:
 		var opts_count: int = CUSTOM_OPTIONS[_track].size()
@@ -131,6 +138,7 @@ func _start_game():
 	GameState.is_endless = false
 	GameState.generated_content = ""
 	GameState.endless_params = {}
+	GameState.gen_params = {}
 
 	if _group == 4:  # GENERATED
 		var preset: Dictionary = GEN_PRESETS[_track].duplicate()
@@ -139,11 +147,11 @@ func _start_game():
 		GameState.selected_group = preset["theme"]
 		GameState.selected_track = _track
 		GameState.is_generated = true
+		GameState.gen_params = preset.duplicate()
 		if preset.get("endless", false):
 			GameState.is_endless = true
 			preset["length"] = 300
 			GameState.endless_params = preset.duplicate()
-			GameState.endless_params["seed"] = preset["seed"]
 		GameState.generated_content = LevelGenerator.generate(preset)
 	elif _group == 5:  # CUSTOM
 		var params := {
@@ -160,12 +168,61 @@ func _start_game():
 		GameState.selected_group = CUSTOM_OPTIONS[4][GameState.custom_idx[4]]
 		GameState.selected_track = 0
 		GameState.is_generated = true
+		GameState.gen_params = params.duplicate()
+		GameState.gen_params["theme"] = GameState.selected_group
 		GameState.generated_content = LevelGenerator.generate(params)
 	else:
 		GameState.selected_group = _group
 		GameState.selected_track = _track
 		var prefix: String = GROUPS[_group]["prefix"]
 		GameState.selected_level = "res://Levels/%s_%d.txt" % [prefix, _track + 1]
+
+	get_tree().change_scene_to_file("res://Scenes/Game.tscn")
+
+func _open_load_dialog():
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.filters = PackedStringArray(["*.txt ; Track Files"])
+	dialog.title = "Load Track"
+	dialog.size = Vector2i(600, 400)
+	dialog.file_selected.connect(func(path: String):
+		var file := FileAccess.open(path, FileAccess.READ)
+		if file:
+			var content := file.get_as_text()
+			file.close()
+			if content.strip_edges() != "":
+				GameState.is_generated = true
+				GameState.is_endless = false
+				GameState.gen_params = {}
+				GameState.selected_group = 0
+				GameState.selected_track = 0
+				GameState.generated_content = content
+				get_tree().change_scene_to_file("res://Scenes/Game.tscn")
+	)
+	add_child(dialog)
+	dialog.popup_centered()
+
+func _import_share_code():
+	var clipboard := DisplayServer.clipboard_get().strip_edges()
+	if clipboard == "":
+		return
+	GameState.is_generated = true
+	GameState.is_endless = false
+	GameState.gen_params = {}
+
+	# Try compact share code first
+	var params := GameState.decode_share_code(clipboard)
+	if not params.is_empty():
+		GameState.gen_params = params.duplicate()
+		GameState.selected_group = params.get("theme", 0)
+		GameState.selected_track = 0
+		GameState.generated_content = LevelGenerator.generate(params)
+	else:
+		# Treat as raw level text
+		GameState.selected_group = 0
+		GameState.selected_track = 0
+		GameState.generated_content = clipboard
 
 	get_tree().change_scene_to_file("res://Scenes/Game.tscn")
 
@@ -342,7 +399,7 @@ func _build_menu():
 
 	# Audio hints
 	var audio_hint := Label.new()
-	audio_hint.text = "M: toggle music | N: toggle sounds"
+	audio_hint.text = "M: music | N: sounds | V: paste track | L: load track file"
 	audio_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	audio_hint.anchor_left = 0
 	audio_hint.anchor_right = 1

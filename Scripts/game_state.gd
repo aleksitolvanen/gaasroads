@@ -7,6 +7,7 @@ var generated_content := ""
 var is_generated := false
 var is_endless := false
 var endless_params := {}
+var gen_params := {}
 var elapsed_time := 0.0
 var endless_best_dist := 0.0
 var custom_idx := [2, 2, 1, 1, 0, 2, 1, 2]
@@ -67,6 +68,37 @@ func format_time(t: float) -> String:
 	var secs := int(t) % 60
 	var ms := int(fmod(t, 1.0) * 100)
 	return "%d:%02d.%02d" % [mins, secs, ms]
+
+func encode_share_code(params: Dictionary) -> String:
+	# Format: GAAS:length:max_height:tunnel_weight:narrow_weight:gap_weight:tunnel_lane_weight:sharpness:theme:seed
+	return "GAAS:%d:%d:%d:%d:%d:%d:%.2f:%d:%d" % [
+		params.get("length", 200),
+		params.get("max_height", 4),
+		params.get("tunnel_weight", 10),
+		params.get("narrow_weight", 15),
+		params.get("gap_weight", 10),
+		params.get("tunnel_lane_weight", 8),
+		params.get("sharpness", 0.12),
+		params.get("theme", 0),
+		params.get("seed", 0),
+	]
+
+func decode_share_code(code: String) -> Dictionary:
+	var parts := code.strip_edges().split(":")
+	if parts.size() < 10 or parts[0] != "GAAS":
+		return {}
+	return {
+		"length": parts[1].to_int(),
+		"max_height": parts[2].to_int(),
+		"tunnel_weight": parts[3].to_int(),
+		"narrow_weight": parts[4].to_int(),
+		"gap_weight": parts[5].to_int(),
+		"tunnel_lane_weight": parts[6].to_int(),
+		"sharpness": parts[7].to_float(),
+		"theme": parts[8].to_int(),
+		"seed": parts[9].to_int(),
+		"min_height": 1,
+	}
 
 func save_endless_best(dist: float):
 	if dist > endless_best_dist:
