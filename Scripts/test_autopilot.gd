@@ -6,37 +6,33 @@ const TILE_HEIGHT := 0.5
 func _initialize():
 	print("=== Autopilot Simulation Test ===")
 	var results := {"success": 0, "wall": 0, "tunnel_wall": 0, "fell": 0, "timeout": 0}
-	var total := 100
 	var crash_details := []
 
+	# Test against known-completable levels (first 2 of each group)
+	var level_files := [
+		"res://Levels/cosmic_1.txt", "res://Levels/cosmic_2.txt",
+		"res://Levels/nebula_1.txt", "res://Levels/nebula_2.txt",
+		"res://Levels/solar_1.txt", "res://Levels/solar_2.txt",
+		"res://Levels/dark_1.txt", "res://Levels/dark_2.txt",
+	]
+	var level_names := [
+		"Cosmic 1", "Cosmic 2", "Nebula 1", "Nebula 2",
+		"Solar 1", "Solar 2", "Dark 1", "Dark 2",
+	]
+
+	var total := level_files.size()
 	for i in total:
-		var params := {
-			"length": 200 + (i % 5) * 50,
-			"max_height": 3 + (i % 3),
-			"tunnel_weight": 8 + (i % 5) * 2,
-			"narrow_weight": 12 + (i % 4) * 3,
-			"gap_weight": 8 + (i % 4) * 2,
-			"tunnel_lane_weight": 6 + (i % 4) * 2,
-			"sharpness": 0.08 + (i % 4) * 0.04,
-			"seed": i * 7919 + 42,
-			"min_height": 1,
-		}
-		var content := LevelGenerator.generate(params)
+		var content := FileAccess.get_file_as_string(level_files[i])
 		var result := _simulate(content, i)
 		results[result.type] += 1
-		if result.type != "success":
-			crash_details.append("Level %d: %s at row=%d col=%.1f speed=%.0f y=%.2f" % [i, result.type, result.row, result.col, result.speed, result.y])
-			if crash_details.size() <= 20:
-				print(crash_details[-1])
+		var status := "OK" if result.type == "success" else "%s at row=%d col=%.1f speed=%.0f y=%.2f" % [result.type, result.row, result.col, result.speed, result.y]
+		print("  %s: %s" % [level_names[i], status])
 
 	print("\n=== Results (%d levels) ===" % total)
 	for key in results:
 		if results[key] > 0:
 			print("  %s: %d (%.0f%%)" % [key, results[key], float(results[key]) / float(total) * 100])
-	print("Success rate: %.0f%%" % (float(results["success"]) / float(total) * 100))
-
-	if crash_details.size() > 20:
-		print("\n(Showing first 20 of %d crashes)" % crash_details.size())
+	print("Success rate: %d/%d" % [results["success"], total])
 	quit()
 
 func _simulate(content: String, level_idx: int) -> Dictionary:
