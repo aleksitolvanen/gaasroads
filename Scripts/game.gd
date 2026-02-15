@@ -43,6 +43,9 @@ var _timer_running := false
 var _share_open := false
 var _level_content := ""
 var _endless_generated_rows := 0
+var _grid: Array[Array] = []
+var _tunnels: Array[Array] = []
+var _cols := 10
 
 func _ready():
 	level_path = GameState.selected_level
@@ -197,7 +200,7 @@ func _create_hud():
 
 	# Share hint
 	var share_hint := Label.new()
-	share_hint.text = "C: share track"
+	share_hint.text = "C: share track | P: autopilot"
 	share_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	share_hint.anchor_left = 0
 	share_hint.anchor_top = 0
@@ -1107,6 +1110,10 @@ func _load_level():
 		grid.append(floor_row)
 		tunnels.append(tunnel_row)
 
+	_grid = grid
+	_tunnels = tunnels
+	_cols = cols
+
 	var group_colors := [
 		Color(0.4, 0.65, 1.0),
 		Color(0.7, 0.4, 0.9),
@@ -1483,6 +1490,11 @@ func _generate_endless_chunk():
 		grid.append(floor_row)
 		tunnels_arr.append(tunnel_row)
 
+	for row in grid:
+		_grid.append(row)
+	for row in tunnels_arr:
+		_tunnels.append(row)
+
 	# Build floor tiles (simple per-tile, no greedy merge for chunks)
 	for r in chunk_rows:
 		for c in cols:
@@ -1653,13 +1665,12 @@ func _create_warp_streaks():
 		tween.tween_property(streak, "scale:z", stretch, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 func _on_ship_warped():
-	if not GameState.is_endless:
+	if not GameState.is_endless and not GameState.autopilot:
 		GameState.mark_completed(GameState.menu_group, GameState.menu_track)
 	get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
 
 func _on_ship_exploded():
-	if GameState.is_endless:
-		# Save best distance before resetting
+	if GameState.is_endless and not GameState.autopilot:
 		var dist := absf(_ship.global_position.z)
 		GameState.save_endless_best(dist)
 	GameState.elapsed_time = 0.0

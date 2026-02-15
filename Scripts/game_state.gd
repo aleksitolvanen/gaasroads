@@ -13,6 +13,7 @@ var endless_best_dist := 0.0
 var custom_idx := [2, 2, 1, 1, 0, 2, 1, 2]
 var sfx_enabled := true
 var classical_mode := false
+var autopilot := false
 var menu_group := 0
 var menu_track := 0
 
@@ -30,7 +31,8 @@ func _process(_delta):
 		var music_str := "ON" if Music._enabled else "OFF"
 		var sfx_str := "ON" if sfx_enabled else "OFF"
 		var mode_str := "Classical" if classical_mode else "Normal"
-		_status_label.text = "Music: %s | Sounds: %s | Mode: %s" % [music_str, sfx_str, mode_str]
+		var ap_str := " | AUTOPILOT" if autopilot else ""
+		_status_label.text = "Music: %s | Sounds: %s | Mode: %s%s" % [music_str, sfx_str, mode_str, ap_str]
 
 func _input(event):
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -38,6 +40,8 @@ func _input(event):
 			sfx_enabled = not sfx_enabled
 		elif event.keycode == KEY_B:
 			classical_mode = not classical_mode
+		elif event.keycode == KEY_P:
+			autopilot = not autopilot
 
 func _build_status_overlay():
 	var layer := CanvasLayer.new()
@@ -48,7 +52,7 @@ func _build_status_overlay():
 	_status_label.anchor_right = 1
 	_status_label.anchor_top = 1
 	_status_label.anchor_bottom = 1
-	_status_label.offset_left = -320
+	_status_label.offset_left = -420
 	_status_label.offset_top = -24
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_status_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.55, 0.7))
