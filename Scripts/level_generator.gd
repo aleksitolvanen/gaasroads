@@ -3,9 +3,24 @@ class_name LevelGenerator
 const W := 10
 
 static func generate(p: Dictionary) -> String:
+	var state := chunk_begin(p)
+	var rows: Array[String] = []
+	while not state.done:
+		rows.append_array(chunk_next(state))
+	return "\n".join(PackedStringArray(rows))
+
+# Incremental generation: chunk_begin() + repeated chunk_next() produce the
+# same rows as generate(), one segment per call, so endless mode can spread
+# the work across frames.
+static func chunk_begin(p: Dictionary) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = p.get("seed", randi())
-	var target: int = p.get("length", 200)
+	return {"rng": rng, "p": p, "rows": 0, "target": p.get("length", 200), "started": false, "done": false}
+
+static func chunk_next(state: Dictionary) -> Array[String]:
+	var rng: RandomNumberGenerator = state.rng
+	var p: Dictionary = state.p
+	var target: int = state.target
 	var min_h: int = p.get("min_height", 1)
 	var max_h: int = p.get("max_height", 4)
 	var tw: int = p.get("tunnel_weight", 10)
@@ -15,11 +30,12 @@ static func generate(p: Dictionary) -> String:
 	var sharpness: float = p.get("sharpness", 0.15)
 
 	var rows: Array[String] = []
-	_add_flat(rows, 1, 8)
-
-	while rows.size() < target:
+	if not state.started:
+		state.started = true
+		_add_flat(rows, 1, 8)
+	elif state.rows < target:
 		_add_flat(rows, 1, 2)
-		var prog := minf(1.0, float(rows.size()) / float(target))
+		var prog := minf(1.0, float(state.rows + rows.size()) / float(target))
 		var st := _pick(rng, tw, nw, gw, tlw, prog)
 		var sl := rng.randi_range(10, 25 + int(prog * 10))
 		match st:
@@ -30,9 +46,11 @@ static func generate(p: Dictionary) -> String:
 			4: _chicane(rng, rows, sl, min_h, max_h, sharpness)
 			5: _gaps(rng, rows, sl, min_h, max_h, prog)
 			6: _tunnel_lane(rng, rows, sl, min_h, max_h, sharpness)
-
-	_add_flat(rows, 1, 6)
-	return "\n".join(PackedStringArray(rows))
+	else:
+		_add_flat(rows, 1, 6)
+		state.done = true
+	state.rows += rows.size()
+	return rows
 
 static func _e() -> Array:
 	var r := []

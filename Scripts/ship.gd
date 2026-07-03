@@ -26,21 +26,24 @@ var _start_position: Vector3
 var _state := State.NORMAL
 var _warp_trail: MeshInstance3D
 var _land_player: AudioStreamPlayer3D
-var _jump_player: AudioStreamPlayer3D
 var _ship_parts: Array[MeshInstance3D] = []
 var _debris: Array[Node3D] = []
 var _engine_mat: StandardMaterial3D
-var _exhaust_core: GPUParticles3D
-var _exhaust_outer: GPUParticles3D
-var _exhaust_trail: GPUParticles3D
+var _exhaust_core: CPUParticles3D
+var _exhaust_outer: CPUParticles3D
+
+const LAND_SOUND_VARIANTS := 5
+static var _land_sounds: Array[AudioStreamWAV] = []
 
 func _ready():
 	_start_position = global_position
 	_build_ship_mesh()
 	_land_player = _create_sfx_player()
 	add_child(_land_player)
-	_jump_player = _create_sfx_player()
-	add_child(_jump_player)
+	if _land_sounds.is_empty():
+		for i in LAND_SOUND_VARIANTS:
+			var freq := lerpf(60.0, 120.0, float(i) / float(LAND_SOUND_VARIANTS - 1))
+			_land_sounds.append(_generate_sound(freq, freq * 0.25, 0.15))
 
 func _create_sfx_player() -> AudioStreamPlayer3D:
 	var p := AudioStreamPlayer3D.new()
@@ -48,7 +51,7 @@ func _create_sfx_player() -> AudioStreamPlayer3D:
 	p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
 	return p
 
-func _generate_sound(start_freq: float, end_freq: float, duration: float, volume: float = 0.5) -> AudioStreamWAV:
+func _generate_sound(start_freq: float, end_freq: float, duration: float) -> AudioStreamWAV:
 	var sample_rate := 22050
 	var samples := int(duration * sample_rate)
 	var data := PackedByteArray()
@@ -59,7 +62,7 @@ func _generate_sound(start_freq: float, end_freq: float, duration: float, volume
 		var freq := lerpf(start_freq, end_freq, t)
 		var envelope := (1.0 - t) * (1.0 - t)
 		phase += freq / sample_rate
-		var sample := sin(phase * TAU) * envelope * volume
+		var sample := sin(phase * TAU) * envelope
 		var val := int(clampf(sample, -1.0, 1.0) * 32767)
 		data[i * 2] = val & 0xFF
 		data[i * 2 + 1] = (val >> 8) & 0xFF
@@ -134,36 +137,30 @@ func _build_ship_mesh():
 	# Forms a dense short cone (~0.5 units = half ship length)
 
 	# Core: bright white-blue, tight cone, large overlapping billboards
-	_exhaust_core = GPUParticles3D.new()
+	_exhaust_core = CPUParticles3D.new()
 	_exhaust_core.position = Vector3(0, 0, 0.56)
-	_exhaust_core.amount = 40
+	_exhaust_core.amount = 45
 	_exhaust_core.lifetime = 0.06
-	var core_pm := ParticleProcessMaterial.new()
-	core_pm.direction = Vector3(0, 0, 1)
-	core_pm.spread = 20.0
-	core_pm.initial_velocity_min = 2.0
-	core_pm.initial_velocity_max = 4.0
-	core_pm.gravity = Vector3.ZERO
-	core_pm.damping_min = 25.0
-	core_pm.damping_max = 40.0
-	core_pm.scale_min = 0.8
-	core_pm.scale_max = 1.2
-	var core_scale_curve := CurveTexture.new()
+	_exhaust_core.direction = Vector3(0, 0, 1)
+	_exhaust_core.spread = 20.0
+	_exhaust_core.initial_velocity_min = 2.0
+	_exhaust_core.initial_velocity_max = 4.0
+	_exhaust_core.gravity = Vector3.ZERO
+	_exhaust_core.damping_min = 25.0
+	_exhaust_core.damping_max = 40.0
+	_exhaust_core.scale_amount_min = 0.8
+	_exhaust_core.scale_amount_max = 1.2
 	var core_curve := Curve.new()
 	core_curve.add_point(Vector2(0, 1.0))
 	core_curve.add_point(Vector2(0.15, 0.6))
 	core_curve.add_point(Vector2(0.4, 0.2))
 	core_curve.add_point(Vector2(1.0, 0.0))
-	core_scale_curve.curve = core_curve
-	core_pm.scale_curve = core_scale_curve
+	_exhaust_core.scale_amount_curve = core_curve
 	var core_grad := Gradient.new()
 	core_grad.set_color(0, Color(0.9, 0.97, 1.0, 0.9))
 	core_grad.add_point(0.3, Color(0.5, 0.8, 1.0, 0.6))
 	core_grad.set_color(1, Color(0.2, 0.5, 0.9, 0.0))
-	var core_ramp := GradientTexture1D.new()
-	core_ramp.gradient = core_grad
-	core_pm.color_ramp = core_ramp
-	_exhaust_core.process_material = core_pm
+	_exhaust_core.color_ramp = core_grad
 	var core_mesh := SphereMesh.new()
 	core_mesh.radius = 0.1
 	core_mesh.height = 0.2
@@ -176,40 +173,34 @@ func _build_ship_mesh():
 	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	core_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	core_mesh.material = core_mat
-	_exhaust_core.draw_pass_1 = core_mesh
+	_exhaust_core.mesh = core_mesh
 	add_child(_exhaust_core)
 
 	# Outer: softer blue glow, wider spread for cone edge
-	_exhaust_outer = GPUParticles3D.new()
+	_exhaust_outer = CPUParticles3D.new()
 	_exhaust_outer.position = Vector3(0, 0, 0.56)
-	_exhaust_outer.amount = 30
+	_exhaust_outer.amount = 35
 	_exhaust_outer.lifetime = 0.08
-	var outer_pm := ParticleProcessMaterial.new()
-	outer_pm.direction = Vector3(0, 0, 1)
-	outer_pm.spread = 35.0
-	outer_pm.initial_velocity_min = 1.5
-	outer_pm.initial_velocity_max = 3.0
-	outer_pm.gravity = Vector3.ZERO
-	outer_pm.damping_min = 20.0
-	outer_pm.damping_max = 35.0
-	outer_pm.scale_min = 1.0
-	outer_pm.scale_max = 1.8
-	var outer_scale_curve := CurveTexture.new()
+	_exhaust_outer.direction = Vector3(0, 0, 1)
+	_exhaust_outer.spread = 35.0
+	_exhaust_outer.initial_velocity_min = 1.5
+	_exhaust_outer.initial_velocity_max = 3.0
+	_exhaust_outer.gravity = Vector3.ZERO
+	_exhaust_outer.damping_min = 20.0
+	_exhaust_outer.damping_max = 35.0
+	_exhaust_outer.scale_amount_min = 1.0
+	_exhaust_outer.scale_amount_max = 1.8
 	var outer_curve := Curve.new()
 	outer_curve.add_point(Vector2(0, 1.0))
 	outer_curve.add_point(Vector2(0.1, 0.5))
 	outer_curve.add_point(Vector2(0.3, 0.15))
 	outer_curve.add_point(Vector2(1.0, 0.0))
-	outer_scale_curve.curve = outer_curve
-	outer_pm.scale_curve = outer_scale_curve
+	_exhaust_outer.scale_amount_curve = outer_curve
 	var outer_grad := Gradient.new()
 	outer_grad.set_color(0, Color(0.25, 0.55, 1.0, 0.5))
 	outer_grad.add_point(0.4, Color(0.1, 0.3, 0.8, 0.15))
 	outer_grad.set_color(1, Color(0.05, 0.15, 0.5, 0.0))
-	var outer_ramp := GradientTexture1D.new()
-	outer_ramp.gradient = outer_grad
-	outer_pm.color_ramp = outer_ramp
-	_exhaust_outer.process_material = outer_pm
+	_exhaust_outer.color_ramp = outer_grad
 	var outer_mesh := SphereMesh.new()
 	outer_mesh.radius = 0.12
 	outer_mesh.height = 0.24
@@ -222,10 +213,8 @@ func _build_ship_mesh():
 	outer_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	outer_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	outer_mesh.material = outer_mat
-	_exhaust_outer.draw_pass_1 = outer_mesh
+	_exhaust_outer.mesh = outer_mesh
 	add_child(_exhaust_outer)
-
-	_exhaust_trail = null
 
 func _physics_process(delta):
 	if _state != State.NORMAL or frozen:
@@ -270,19 +259,13 @@ func _physics_process(delta):
 	var has_thrust := speed_t > 0.05
 	if _exhaust_core:
 		_exhaust_core.emitting = has_thrust
-		var pm: ParticleProcessMaterial = _exhaust_core.process_material
-		pm.initial_velocity_min = lerpf(1.0, 4.0, speed_t)
-		pm.initial_velocity_max = lerpf(2.0, 6.0, speed_t)
-		_exhaust_core.amount = int(lerpf(15, 45, speed_t))
-		_exhaust_core.lifetime = lerpf(0.03, 0.07, speed_t)
+		_exhaust_core.initial_velocity_min = lerpf(1.0, 4.0, speed_t)
+		_exhaust_core.initial_velocity_max = lerpf(2.0, 6.0, speed_t)
 	if _exhaust_outer:
 		_exhaust_outer.emitting = has_thrust
-		var pm2: ParticleProcessMaterial = _exhaust_outer.process_material
-		pm2.initial_velocity_min = lerpf(0.8, 3.0, speed_t)
-		pm2.initial_velocity_max = lerpf(1.5, 4.5, speed_t)
-		pm2.spread = lerpf(25.0, 40.0, speed_t)
-		_exhaust_outer.amount = int(lerpf(12, 35, speed_t))
-		_exhaust_outer.lifetime = lerpf(0.04, 0.09, speed_t)
+		_exhaust_outer.initial_velocity_min = lerpf(0.8, 3.0, speed_t)
+		_exhaust_outer.initial_velocity_max = lerpf(1.5, 4.5, speed_t)
+		_exhaust_outer.spread = lerpf(25.0, 40.0, speed_t)
 
 	var vel := Vector3(0, 0, -current_speed)
 
@@ -310,9 +293,11 @@ func _physics_process(delta):
 			_can_jump = true
 			# Bongo-like landing thud — only for significant impacts
 			if impact > 2.0 and GameState.sfx_enabled:
-				var freq := lerpf(60, 120, clampf(impact / 15.0, 0.0, 1.0))
+				PerfMonitor.mark("land_sfx")
+				var t := clampf(impact / 15.0, 0.0, 1.0)
 				var vol := clampf(impact / 12.0, 0.3, 0.8)
-				_land_player.stream = _generate_sound(freq, freq * 0.25, 0.15, vol)
+				_land_player.stream = _land_sounds[roundi(t * (LAND_SOUND_VARIANTS - 1))]
+				_land_player.volume_db = linear_to_db(vol)
 				_land_player.play()
 		else:
 			_vertical_velocity = 0
@@ -375,6 +360,7 @@ func start_warp():
 	if _state != State.NORMAL:
 		return
 	_state = State.WARPING
+	PerfMonitor.mark("warp")
 
 	# Bright engine trail
 	var trail_mat := StandardMaterial3D.new()
@@ -392,7 +378,7 @@ func start_warp():
 	_warp_trail.position = Vector3(0, 0, 1.3)
 	add_child(_warp_trail)
 
-	var tween := create_tween()
+	var tween := create_tween().set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
 	# Phase 1: Engine powers up - trail grows bright
 	tween.tween_property(_warp_trail, "scale:z", 20.0, 0.8)
 	tween.parallel().tween_property(_warp_trail, "position:z", 6.0, 0.8)
@@ -409,13 +395,12 @@ func start_explosion():
 	if _state != State.NORMAL:
 		return
 	_state = State.EXPLODING
+	PerfMonitor.mark("explosion")
 	velocity = Vector3.ZERO
 	if _exhaust_core:
 		_exhaust_core.emitting = false
 	if _exhaust_outer:
 		_exhaust_outer.emitting = false
-	if _exhaust_trail:
-		_exhaust_trail.emitting = false
 
 	# Reparent ship parts to scene and fling them
 	var scene_root := get_parent()
@@ -426,6 +411,7 @@ func start_explosion():
 		scene_root.add_child(part)
 		part.global_position = world_pos
 		part.global_rotation = world_rot
+		part.reset_physics_interpolation()
 		_debris.append(part)
 
 		var rng_vel := Vector3(
@@ -439,7 +425,7 @@ func start_explosion():
 			randf_range(-10, 10)
 		)
 
-		var tween := part.create_tween()
+		var tween := part.create_tween().set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
 		tween.set_parallel(true)
 		tween.tween_property(part, "position", world_pos + rng_vel, 1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		tween.tween_property(part, "position:y", world_pos.y - 5, 1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN).set_delay(0.3)
@@ -451,10 +437,12 @@ func start_explosion():
 	timer.timeout.connect(func(): exploded.emit())
 
 func reset_ship():
+	PerfMonitor.mark("ship_reset")
 	_state = State.NORMAL
 	visible = true
 	scale = Vector3.ONE
 	global_position = _start_position
+	reset_physics_interpolation()
 	_vertical_velocity = 0
 	_was_on_floor = true
 	_jump_airborne = false

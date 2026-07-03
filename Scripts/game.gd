@@ -36,21 +36,35 @@ var _mothership_active := false
 var _fighters: Array[Node3D] = []
 var _green_laser_mat: StandardMaterial3D
 var _red_laser_mat: StandardMaterial3D
+var _laser_mesh: BoxMesh
 var _timer_label: Label
 var _share_panel: Control
 var _share_text: LineEdit
 var _timer_running := false
 var _share_open := false
 var _level_content := ""
-var _endless_generated_rows := 0
 var _grid: Array[Array] = []
 var _tunnels: Array[Array] = []
 var _cols := 10
+var _build_queue: Array = []
+var _build_next := 0
+var _level_ready := false
+var _build_start_msec := 0
+var _ready_label: Label
+var _height_materials: Dictionary = {}
+var _tunnel_wall_mat: StandardMaterial3D
+var _spawned_track: Array = []
+var _cleanup_tick := 0
+var _chunk_state := {}
+var _warmup: Node3D
+var _smooth_frames := 0
+
+const READY_DELAY_MSEC := 600
+const READY_TIMEOUT_MSEC := 6000
 
 func _ready():
 	level_path = GameState.selected_level
 	_ship = $Ship
-	_ship.frozen = false
 	_ship.current_speed = 12.0
 	_ship.warped.connect(_on_ship_warped)
 	_ship.exploded.connect(_on_ship_exploded)
@@ -63,16 +77,28 @@ func _ready():
 			_ship.gravity = 8.0
 			_ship.jump_velocity = 7.8
 	_camera = $Camera3D
+	# Run after the ship's physics tick so the camera follows its fresh position
+	process_physics_priority = 1
 	GameState.elapsed_time = 0.0
 	_timer_running = false
 	_create_space_environment()
 	_create_hud()
+	_init_track_materials()
+	_create_shader_warmup()
 	_load_level()
 	Music.play_for_group(GameState.selected_group)
 
 func _process(delta):
 	if _share_open:
 		return
+	# Frame-time settle detector: on WebGL the first round of a session spends
+	# its first seconds draining the shader-compile queue, stalling frames.
+	# GET READY stays up until frames are smooth again.
+	if delta < 0.025:
+		_smooth_frames += 1
+	else:
+		_smooth_frames = 0
+	_process_build_queue()
 	if Input.is_action_just_pressed("ui_cancel") or Input.is_physical_key_pressed(KEY_Q):
 		get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
 		return
@@ -80,7 +106,6 @@ func _process(delta):
 	var ship_pos := _ship.global_position
 
 	if _mothership_active and not _finishing:
-		_update_fighters(ship_pos)
 		_laser_timer -= delta
 		if _laser_timer <= 0:
 			_laser_timer = _laser_rng.randf_range(0.08, 0.25)
@@ -90,6 +115,49 @@ func _process(delta):
 		_finishing = true
 		_ship.start_warp()
 		_create_warp_streaks()
+
+	_speed_gauge.value = _ship.current_speed
+	_speed_label.text = "%d" % _ship.current_speed
+
+	# Timer
+	if not _timer_running and _level_ready and _ship.current_speed > 0 and not _finishing:
+		_timer_running = true
+	if _timer_running and not _finishing:
+		GameState.elapsed_time += delta
+	if _timer_label:
+		if GameState.is_endless:
+			var dist := int(absf(ship_pos.z))
+			_timer_label.text = "%dm" % dist
+		else:
+			_timer_label.text = GameState.format_time(GameState.elapsed_time) if GameState.elapsed_time > 0.0 else "0:00.00"
+
+	# Endless mode: generate ahead (one segment per frame), free track far behind
+	if GameState.is_endless and _level_ready:
+		if not _chunk_state.is_empty():
+			var t0 := Time.get_ticks_usec()
+			var new_rows := LevelGenerator.chunk_next(_chunk_state)
+			if new_rows.size() > 0:
+				_enqueue_rows(PackedStringArray(new_rows))
+			if _chunk_state.done:
+				_chunk_state = {}
+			PerfMonitor.mark("chunk_seg %d rows %dus" % [new_rows.size(), Time.get_ticks_usec() - t0])
+		elif ship_pos.z - _level_end_z < 600:
+			var params: Dictionary = GameState.endless_params.duplicate()
+			params["seed"] = randi()
+			params["length"] = 200
+			_chunk_state = LevelGenerator.chunk_begin(params)
+		_cleanup_tick += 1
+		if _cleanup_tick >= 30:
+			_cleanup_tick = 0
+			_free_passed_track(ship_pos.z)
+
+func _physics_process(_delta):
+	if _share_open:
+		return
+	var ship_pos := _ship.global_position
+
+	if _mothership_active and not _finishing:
+		_update_fighters(ship_pos)
 
 	if not _finishing:
 		_camera.global_position = Vector3(ship_pos.x, ship_pos.y + 2.5, ship_pos.z + 4.2)
@@ -101,35 +169,14 @@ func _process(delta):
 	if _bg_quad:
 		_bg_quad.global_position = Vector3(ship_pos.x, ship_pos.y - 20, ship_pos.z - 120)
 
-	_speed_gauge.value = _ship.current_speed
-	_speed_label.text = "%d" % _ship.current_speed
-
-	# Timer
-	if not _timer_running and _ship.current_speed > 0 and not _finishing:
-		_timer_running = true
-	if _timer_running and not _finishing:
-		GameState.elapsed_time += delta
-	if _timer_label:
-		if GameState.is_endless:
-			var dist := int(absf(ship_pos.z))
-			_timer_label.text = "%dm" % dist
-		else:
-			_timer_label.text = GameState.format_time(GameState.elapsed_time) if GameState.elapsed_time > 0.0 else "0:00.00"
-
-	# Endless mode: generate more chunks as player approaches end
-	if GameState.is_endless and not _finishing:
-		var dist_to_end := ship_pos.z - _level_end_z
-		if dist_to_end < 600:
-			_generate_endless_chunk()
-
 func _create_hud():
 	var canvas := CanvasLayer.new()
 	_hud_canvas = canvas
 	add_child(canvas)
 
-	if ResourceLoader.exists("res://cockpit.png"):
+	if GameState.cockpit_texture:
 		var cockpit_rect := TextureRect.new()
-		cockpit_rect.texture = load("res://cockpit.png")
+		cockpit_rect.texture = GameState.cockpit_texture
 		cockpit_rect.anchor_left = 0
 		cockpit_rect.anchor_top = 0
 		cockpit_rect.anchor_right = 1
@@ -226,6 +273,20 @@ func _create_hud():
 	_timer_label.add_theme_font_size_override("font_size", 14)
 	canvas.add_child(_timer_label)
 
+	# Shown while the track is being built
+	_ready_label = Label.new()
+	_ready_label.text = "GET READY"
+	_ready_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_ready_label.anchor_left = 0
+	_ready_label.anchor_right = 1
+	_ready_label.anchor_top = 0.35
+	_ready_label.anchor_bottom = 0.35
+	_ready_label.offset_bottom = 44
+	_ready_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.5))
+	_ready_label.add_theme_font_size_override("font_size", 32)
+	_ready_label.visible = false
+	canvas.add_child(_ready_label)
+
 func _create_space_environment():
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
@@ -283,13 +344,13 @@ func _create_space_environment():
 			_create_image_background()
 
 func _create_image_background():
-	if ResourceLoader.exists("res://background.png"):
+	if GameState.background_texture:
 		_bg_quad = MeshInstance3D.new()
 		var quad_mesh := QuadMesh.new()
 		quad_mesh.size = Vector2(500, 300)
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_texture = load("res://background.png")
+		mat.albedo_texture = GameState.background_texture
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		quad_mesh.material = mat
 		_bg_quad.mesh = quad_mesh
@@ -582,6 +643,9 @@ func _create_dark_matter_background():
 	_red_laser_mat.emission_enabled = true
 	_red_laser_mat.emission = Color(0.9, 0.1, 0.05)
 	_red_laser_mat.emission_energy_multiplier = 4.0
+
+	_laser_mesh = BoxMesh.new()
+	_laser_mesh.size = Vector3(0.15, 0.15, 15.0)
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 66
@@ -1017,25 +1081,24 @@ func _spawn_laser(ship_pos: Vector3):
 	var dir := (target - origin).normalized()
 	var mat := _green_laser_mat if _laser_rng.randf() > 0.3 else _red_laser_mat
 
+	PerfMonitor.mark("laser")
 	var laser := MeshInstance3D.new()
-	var laser_mesh := BoxMesh.new()
-	laser_mesh.size = Vector3(0.15, 0.15, 15.0)
-	laser_mesh.material = mat
-	laser.mesh = laser_mesh
+	laser.mesh = _laser_mesh
+	laser.material_override = mat
+	add_child(laser)
 	laser.global_position = origin
 	laser.look_at(origin + dir)
-	add_child(laser)
+	laser.reset_physics_interpolation()
 
 	var speed := _laser_rng.randf_range(40.0, 70.0)
 	var dist := origin.distance_to(target) + 80.0
 	var travel_time := dist / speed
 	var end_pos := origin + dir * dist
-	var tween := create_tween()
+	var tween := create_tween().set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
 	tween.tween_property(laser, "global_position", end_pos, travel_time).set_trans(Tween.TRANS_LINEAR)
 	tween.tween_callback(laser.queue_free)
 
 func _load_level():
-	var level_node := $Level
 	var content: String
 
 	if GameState.generated_content != "":
@@ -1060,45 +1123,65 @@ func _load_level():
 		warn.add_theme_font_size_override("font_size", 14)
 		_hud_canvas.add_child(warn)
 
+	_start_track(content)
+
+func _start_track(content: String):
+	# Clears any existing track, then queues the new one for time-sliced building
+	for child in $Level.get_children():
+		child.queue_free()
+	_grid = []
+	_tunnels = []
+	_build_queue.clear()
+	_build_next = 0
+	_spawned_track.clear()
+	_chunk_state = {}
 	_level_content = content
+	_level_ready = false
+	_build_start_msec = Time.get_ticks_msec()
+	_ship.frozen = true
+	if _ready_label:
+		_ready_label.visible = true
+	if _warmup:
+		_warmup.visible = true
 
 	# Prepend a flat runway before the level content
 	var runway_row := "..".repeat(2) + "1.".repeat(6) + "..".repeat(2)
-	var runway_lines := PackedStringArray()
+	var lines := PackedStringArray()
 	for _i in 24:
-		runway_lines.append(runway_row)
-
-	var lines := runway_lines + content.split("\n")
+		lines.append(runway_row)
+	lines += content.split("\n")
 	# Remove trailing empty lines
 	while lines.size() > 0 and lines[-1].strip_edges() == "":
 		lines.remove_at(lines.size() - 1)
-	var rows := lines.size()
 
-	# Parse 2-char tile format: each tile = [height_char][modifier_char]
+	# Tile format is 2 chars: [height_char][modifier_char]
 	var cols := 0
 	for line in lines:
 		var c := line.length() / 2
 		if c > cols:
 			cols = c
+	_cols = cols
 
-	_level_end_z = -(rows - 1) * TILE_SIZE
-	if GameState.is_endless:
-		_endless_generated_rows = rows - 24  # subtract runway
+	_enqueue_rows(lines)
+
+func _enqueue_rows(lines: PackedStringArray):
+	var row_offset := _grid.size()
+	var rows := lines.size()
 
 	var grid: Array[Array] = []
 	var tunnels: Array[Array] = []
 	for r in rows:
 		var floor_row: Array[int] = []
-		floor_row.resize(cols)
+		floor_row.resize(_cols)
 		floor_row.fill(0)
 		var tunnel_row: Array[bool] = []
-		tunnel_row.resize(cols)
+		tunnel_row.resize(_cols)
 		tunnel_row.fill(false)
 
 		var line := lines[r]
 		for ci in range(0, line.length(), 2):
 			var tile_idx := ci / 2
-			if tile_idx >= cols:
+			if tile_idx >= _cols:
 				break
 			var h_char := line[ci]
 			var m_char := line[ci + 1] if ci + 1 < line.length() else "."
@@ -1109,11 +1192,248 @@ func _load_level():
 				tunnel_row[tile_idx] = true
 		grid.append(floor_row)
 		tunnels.append(tunnel_row)
+		_grid.append(floor_row)
+		_tunnels.append(tunnel_row)
 
-	_grid = grid
-	_tunnels = tunnels
-	_cols = cols
+	_level_end_z = -(_grid.size() - 1) * TILE_SIZE
 
+	# Greedy-merge floor tiles within this block into build jobs
+	var used: Array[Array] = []
+	for r in rows:
+		var row: Array[bool] = []
+		row.resize(_cols)
+		row.fill(false)
+		used.append(row)
+
+	for r in rows:
+		for c in _cols:
+			var height: int = grid[r][c]
+			if height == 0 or used[r][c]:
+				continue
+
+			var w := 0
+			while c + w < _cols and grid[r][c + w] == height and not used[r][c + w]:
+				w += 1
+
+			var d := 1
+			while r + d < rows:
+				var ok := true
+				for cc in range(c, c + w):
+					if grid[r + d][cc] != height or used[r + d][cc]:
+						ok = false
+						break
+				if not ok:
+					break
+				d += 1
+
+			for rr in range(r, r + d):
+				for cc in range(c, c + w):
+					used[rr][cc] = true
+
+			_build_queue.append([0, c, row_offset + r, w, d, height])
+
+	# Tunnel arches — merge consecutive tunnel rows at same column/height into jobs
+	var t_used: Array[Array] = []
+	for r in rows:
+		var row: Array[bool] = []
+		row.resize(_cols)
+		row.fill(false)
+		t_used.append(row)
+
+	for r in rows:
+		for c in _cols:
+			if not tunnels[r][c] or t_used[r][c] or grid[r][c] == 0:
+				continue
+			var floor_h: int = grid[r][c]
+			var depth := 0
+			while r + depth < rows and tunnels[r + depth][c] and grid[r + depth][c] == floor_h and not t_used[r + depth][c]:
+				depth += 1
+			for rr in range(r, r + depth):
+				t_used[rr][c] = true
+			_build_queue.append([1, c, row_offset + r, depth, floor_h])
+
+func _process_build_queue():
+	if _build_next >= _build_queue.size():
+		if not _level_ready and not _grid.is_empty():
+			var waited := Time.get_ticks_msec() - _build_start_msec
+			if waited >= READY_DELAY_MSEC and (_smooth_frames >= 8 or waited > READY_TIMEOUT_MSEC):
+				_level_ready = true
+				_ship.frozen = false
+				if _ready_label:
+					_ready_label.visible = false
+				if _warmup:
+					_warmup.visible = false
+				print("[PERF] level ready after %dms" % waited)
+		return
+	var level_node := $Level
+	# Bigger budget behind the GET READY screen, small one during play
+	var budget_usec := 8000 if not _level_ready else 3000
+	var deadline := Time.get_ticks_usec() + budget_usec
+	var built := 0
+	while _build_next < _build_queue.size() and Time.get_ticks_usec() < deadline:
+		var job: Array = _build_queue[_build_next]
+		_build_next += 1
+		built += 1
+		if job[0] == 0:
+			_build_tile_job(level_node, job)
+		else:
+			_build_arch_job(level_node, job)
+	if _level_ready and built > 0:
+		PerfMonitor.mark("built %d jobs" % built)
+	if _build_next >= _build_queue.size():
+		_build_queue.clear()
+		_build_next = 0
+
+func _build_tile_job(level_node: Node3D, job: Array):
+	var c: int = job[1]
+	var r: int = job[2]
+	var w: int = job[3]
+	var d: int = job[4]
+	var height: int = job[5]
+	var actual_height := height * TILE_HEIGHT
+	var tile := _create_merged_tile(w, d, actual_height, _height_materials[height])
+	tile.position = Vector3(
+		c * TILE_SIZE + (w - 1) * TILE_SIZE / 2.0,
+		actual_height / 2.0,
+		-r * TILE_SIZE - (d - 1) * TILE_SIZE / 2.0
+	)
+	level_node.add_child(tile)
+	if GameState.is_endless:
+		_spawned_track.append([tile, -(r + d) * TILE_SIZE])
+
+func _build_arch_job(level_node: Node3D, job: Array):
+	var c: int = job[1]
+	var r: int = job[2]
+	var depth: int = job[3]
+	var floor_h: int = job[4]
+
+	var base_y := floor_h * TILE_HEIGHT
+	var arch_height := 1.2
+	var half_w := TILE_SIZE / 2.0
+	var wall_thickness := 0.06
+	var center_x := c * TILE_SIZE
+	var center_z := -r * TILE_SIZE - (depth - 1) * TILE_SIZE / 2.0
+	var tunnel_depth := depth * TILE_SIZE
+	var arch_segments := 24
+	var min_y := 0.1
+
+	# Build smooth half-cylinder with SurfaceTool
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var z_front := tunnel_depth / 2.0
+	var z_back := -tunnel_depth / 2.0
+
+	for seg in arch_segments:
+		var a0 := PI * float(seg) / float(arch_segments)
+		var a1 := PI * float(seg + 1) / float(arch_segments)
+		var x0 := -cos(a0) * half_w
+		var y0 := sin(a0) * arch_height
+		var x1 := -cos(a1) * half_w
+		var y1 := sin(a1) * arch_height
+		if y0 < min_y and y1 < min_y:
+			continue
+
+		# Normal at each point (pointing outward)
+		var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
+		var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
+
+		# Outer surface
+		var o0f := Vector3(x0, y0, z_front)
+		var o1f := Vector3(x1, y1, z_front)
+		var o0b := Vector3(x0, y0, z_back)
+		var o1b := Vector3(x1, y1, z_back)
+		# Inner surface (offset inward)
+		var i0f := o0f - n0 * wall_thickness
+		var i1f := o1f - n1 * wall_thickness
+		var i0b := o0b - n0 * wall_thickness
+		var i1b := o1b - n1 * wall_thickness
+
+		# Outer face (normals out)
+		st.set_normal(n0); st.add_vertex(o0f)
+		st.set_normal(n1); st.add_vertex(o1f)
+		st.set_normal(n0); st.add_vertex(o0b)
+		st.set_normal(n1); st.add_vertex(o1f)
+		st.set_normal(n1); st.add_vertex(o1b)
+		st.set_normal(n0); st.add_vertex(o0b)
+
+		# Inner face (normals in)
+		st.set_normal(-n0); st.add_vertex(i0b)
+		st.set_normal(-n1); st.add_vertex(i1f)
+		st.set_normal(-n0); st.add_vertex(i0f)
+		st.set_normal(-n0); st.add_vertex(i0b)
+		st.set_normal(-n1); st.add_vertex(i1b)
+		st.set_normal(-n1); st.add_vertex(i1f)
+
+	# Front and back cap rings
+	for seg in arch_segments:
+		var a0 := PI * float(seg) / float(arch_segments)
+		var a1 := PI * float(seg + 1) / float(arch_segments)
+		var x0 := -cos(a0) * half_w
+		var y0 := sin(a0) * arch_height
+		var x1 := -cos(a1) * half_w
+		var y1 := sin(a1) * arch_height
+		if y0 < min_y and y1 < min_y:
+			continue
+		var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
+		var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
+		var o0 := Vector3(x0, y0, 0)
+		var o1 := Vector3(x1, y1, 0)
+		var i0 := o0 - n0 * wall_thickness
+		var i1 := o1 - n1 * wall_thickness
+		# Front cap
+		var fz := Vector3(0, 0, z_front)
+		var fn := Vector3(0, 0, 1)
+		st.set_normal(fn); st.add_vertex(o0 + fz)
+		st.set_normal(fn); st.add_vertex(i1 + fz)
+		st.set_normal(fn); st.add_vertex(i0 + fz)
+		st.set_normal(fn); st.add_vertex(o0 + fz)
+		st.set_normal(fn); st.add_vertex(o1 + fz)
+		st.set_normal(fn); st.add_vertex(i1 + fz)
+		# Back cap
+		var bz := Vector3(0, 0, z_back)
+		var bn := Vector3(0, 0, -1)
+		st.set_normal(bn); st.add_vertex(i0 + bz)
+		st.set_normal(bn); st.add_vertex(i1 + bz)
+		st.set_normal(bn); st.add_vertex(o0 + bz)
+		st.set_normal(bn); st.add_vertex(o1 + bz)
+		st.set_normal(bn); st.add_vertex(o0 + bz)
+		st.set_normal(bn); st.add_vertex(i1 + bz)
+
+	var arch_mesh := st.commit()
+	arch_mesh.surface_set_material(0, _tunnel_wall_mat)
+
+	var arch_body := StaticBody3D.new()
+	arch_body.set_meta("tunnel_wall", true)
+	var mesh_inst := MeshInstance3D.new()
+	mesh_inst.mesh = arch_mesh
+	arch_body.add_child(mesh_inst)
+
+	# Trimesh collision from the generated mesh
+	var trimesh_shape := arch_mesh.create_trimesh_shape()
+	var col_shape := CollisionShape3D.new()
+	col_shape.shape = trimesh_shape
+	arch_body.add_child(col_shape)
+
+	arch_body.position = Vector3(center_x, base_y, center_z)
+	level_node.add_child(arch_body)
+
+	# Invisible solid roof on top to prevent clipping through
+	var roof_body := StaticBody3D.new()
+	roof_body.set_meta("tunnel_wall", true)
+	var roof_col := CollisionShape3D.new()
+	var roof_box := BoxShape3D.new()
+	roof_box.size = Vector3(TILE_SIZE, 0.3, tunnel_depth)
+	roof_col.shape = roof_box
+	roof_body.add_child(roof_col)
+	roof_body.position = Vector3(center_x, base_y + arch_height + 0.15, center_z)
+	level_node.add_child(roof_body)
+
+	if GameState.is_endless:
+		var end_z := -(r + depth) * TILE_SIZE
+		_spawned_track.append([arch_body, end_z])
+		_spawned_track.append([roof_body, end_z])
+
+func _init_track_materials():
 	var group_colors := [
 		Color(0.4, 0.65, 1.0),
 		Color(0.7, 0.4, 0.9),
@@ -1122,7 +1442,6 @@ func _load_level():
 	]
 	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
 
-	var height_materials: Dictionary = {}
 	for h in range(1, 10):
 		var mat := StandardMaterial3D.new()
 		var brightness := 1.2 + (h - 1) * 0.1
@@ -1131,205 +1450,33 @@ func _load_level():
 		mat.emission_enabled = true
 		mat.emission = base_color * 0.3
 		mat.emission_energy_multiplier = 0.5
-		height_materials[h] = mat
+		_height_materials[h] = mat
 
-	# Tunnel ceiling material - darker variant
-	var ceil_mat := StandardMaterial3D.new()
-	ceil_mat.albedo_color = base_color.darkened(0.3)
-	ceil_mat.albedo_color.a = 1.0
-	ceil_mat.emission_enabled = true
-	ceil_mat.emission = base_color * 0.15
-	ceil_mat.emission_energy_multiplier = 0.3
+	_tunnel_wall_mat = StandardMaterial3D.new()
+	_tunnel_wall_mat.albedo_color = base_color.darkened(0.4)
+	_tunnel_wall_mat.emission_enabled = true
+	_tunnel_wall_mat.emission = base_color * 0.1
+	_tunnel_wall_mat.emission_energy_multiplier = 0.3
+	_tunnel_wall_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
-	# Greedy-merge floor tiles
-	var used: Array[Array] = []
-	for r in rows:
-		var row: Array[bool] = []
-		row.resize(cols)
-		row.fill(false)
-		used.append(row)
+func _free_passed_track(ship_z: float):
+	var keep: Array = []
+	var freed := 0
+	for entry in _spawned_track:
+		if entry[1] > ship_z + 20.0:
+			entry[0].queue_free()
+			freed += 1
+		else:
+			keep.append(entry)
+	_spawned_track = keep
+	if freed > 0:
+		PerfMonitor.mark("freed %d" % freed)
 
-	for r in rows:
-		for c in cols:
-			var height: int = grid[r][c]
-			if height == 0 or used[r][c]:
-				continue
-
-			var w := 0
-			while c + w < cols and grid[r][c + w] == height and not used[r][c + w]:
-				w += 1
-
-			var h := 1
-			while r + h < rows:
-				var ok := true
-				for cc in range(c, c + w):
-					if cc >= cols or grid[r + h][cc] != height or used[r + h][cc]:
-						ok = false
-						break
-				if not ok:
-					break
-				h += 1
-
-			for rr in range(r, r + h):
-				for cc in range(c, c + w):
-					used[rr][cc] = true
-
-			var actual_height := height * TILE_HEIGHT
-			var tile := _create_merged_tile(w, h, actual_height, height_materials[height])
-			tile.position = Vector3(
-				c * TILE_SIZE + (w - 1) * TILE_SIZE / 2.0,
-				actual_height / 2.0,
-				-r * TILE_SIZE - (h - 1) * TILE_SIZE / 2.0
-			)
-			level_node.add_child(tile)
-
-	# Build arched tunnels — merge consecutive tunnel rows at same column/height
-	var t_used: Array[Array] = []
-	for r in rows:
-		var row: Array[bool] = []
-		row.resize(cols)
-		row.fill(false)
-		t_used.append(row)
-
-	var tunnel_wall_mat := StandardMaterial3D.new()
-	tunnel_wall_mat.albedo_color = base_color.darkened(0.4)
-	tunnel_wall_mat.emission_enabled = true
-	tunnel_wall_mat.emission = base_color * 0.1
-	tunnel_wall_mat.emission_energy_multiplier = 0.3
-	tunnel_wall_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-
-	for r in rows:
-		for c in cols:
-			if not tunnels[r][c] or t_used[r][c] or grid[r][c] == 0:
-				continue
-			var floor_h: int = grid[r][c]
-			# Merge along Z (consecutive rows, same column and height)
-			var depth := 0
-			while r + depth < rows and tunnels[r + depth][c] and grid[r + depth][c] == floor_h and not t_used[r + depth][c]:
-				depth += 1
-			for rr in range(r, r + depth):
-				t_used[rr][c] = true
-
-			var base_y := floor_h * TILE_HEIGHT
-			var arch_height := 1.2
-			var half_w := TILE_SIZE / 2.0
-			var wall_thickness := 0.06
-			var center_x := c * TILE_SIZE
-			var center_z := -r * TILE_SIZE - (depth - 1) * TILE_SIZE / 2.0
-			var tunnel_depth := depth * TILE_SIZE
-			var arch_segments := 24
-			var min_y := 0.1
-
-			# Build smooth half-cylinder with SurfaceTool
-			var st := SurfaceTool.new()
-			st.begin(Mesh.PRIMITIVE_TRIANGLES)
-			var z_front := tunnel_depth / 2.0
-			var z_back := -tunnel_depth / 2.0
-
-			for seg in arch_segments:
-				var a0 := PI * float(seg) / float(arch_segments)
-				var a1 := PI * float(seg + 1) / float(arch_segments)
-				var x0 := -cos(a0) * half_w
-				var y0 := sin(a0) * arch_height
-				var x1 := -cos(a1) * half_w
-				var y1 := sin(a1) * arch_height
-				if y0 < min_y and y1 < min_y:
-					continue
-
-				# Normal at each point (pointing outward)
-				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
-				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
-
-				# Outer surface
-				var o0f := Vector3(x0, y0, z_front)
-				var o1f := Vector3(x1, y1, z_front)
-				var o0b := Vector3(x0, y0, z_back)
-				var o1b := Vector3(x1, y1, z_back)
-				# Inner surface (offset inward)
-				var i0f := o0f - n0 * wall_thickness
-				var i1f := o1f - n1 * wall_thickness
-				var i0b := o0b - n0 * wall_thickness
-				var i1b := o1b - n1 * wall_thickness
-
-				# Outer face (normals out)
-				st.set_normal(n0); st.add_vertex(o0f)
-				st.set_normal(n1); st.add_vertex(o1f)
-				st.set_normal(n0); st.add_vertex(o0b)
-				st.set_normal(n1); st.add_vertex(o1f)
-				st.set_normal(n1); st.add_vertex(o1b)
-				st.set_normal(n0); st.add_vertex(o0b)
-
-				# Inner face (normals in)
-				st.set_normal(-n0); st.add_vertex(i0b)
-				st.set_normal(-n1); st.add_vertex(i1f)
-				st.set_normal(-n0); st.add_vertex(i0f)
-				st.set_normal(-n0); st.add_vertex(i0b)
-				st.set_normal(-n1); st.add_vertex(i1b)
-				st.set_normal(-n1); st.add_vertex(i1f)
-
-			# Front and back cap rings
-			for seg in arch_segments:
-				var a0 := PI * float(seg) / float(arch_segments)
-				var a1 := PI * float(seg + 1) / float(arch_segments)
-				var x0 := -cos(a0) * half_w
-				var y0 := sin(a0) * arch_height
-				var x1 := -cos(a1) * half_w
-				var y1 := sin(a1) * arch_height
-				if y0 < min_y and y1 < min_y:
-					continue
-				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
-				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
-				var o0 := Vector3(x0, y0, 0)
-				var o1 := Vector3(x1, y1, 0)
-				var i0 := o0 - n0 * wall_thickness
-				var i1 := o1 - n1 * wall_thickness
-				# Front cap
-				var fz := Vector3(0, 0, z_front)
-				var fn := Vector3(0, 0, 1)
-				st.set_normal(fn); st.add_vertex(o0 + fz)
-				st.set_normal(fn); st.add_vertex(i1 + fz)
-				st.set_normal(fn); st.add_vertex(i0 + fz)
-				st.set_normal(fn); st.add_vertex(o0 + fz)
-				st.set_normal(fn); st.add_vertex(o1 + fz)
-				st.set_normal(fn); st.add_vertex(i1 + fz)
-				# Back cap
-				var bz := Vector3(0, 0, z_back)
-				var bn := Vector3(0, 0, -1)
-				st.set_normal(bn); st.add_vertex(i0 + bz)
-				st.set_normal(bn); st.add_vertex(i1 + bz)
-				st.set_normal(bn); st.add_vertex(o0 + bz)
-				st.set_normal(bn); st.add_vertex(o1 + bz)
-				st.set_normal(bn); st.add_vertex(o0 + bz)
-				st.set_normal(bn); st.add_vertex(i1 + bz)
-
-			var arch_mesh := st.commit()
-			arch_mesh.surface_set_material(0, tunnel_wall_mat)
-
-			var arch_body := StaticBody3D.new()
-			arch_body.set_meta("tunnel_wall", true)
-			var mesh_inst := MeshInstance3D.new()
-			mesh_inst.mesh = arch_mesh
-			arch_body.add_child(mesh_inst)
-
-			# Trimesh collision from the generated mesh
-			var trimesh_shape := arch_mesh.create_trimesh_shape()
-			var col_shape := CollisionShape3D.new()
-			col_shape.shape = trimesh_shape
-			arch_body.add_child(col_shape)
-
-			arch_body.position = Vector3(center_x, base_y, center_z)
-			level_node.add_child(arch_body)
-
-			# Invisible solid roof on top to prevent clipping through
-			var roof_body := StaticBody3D.new()
-			roof_body.set_meta("tunnel_wall", true)
-			var roof_col := CollisionShape3D.new()
-			var roof_box := BoxShape3D.new()
-			roof_box.size = Vector3(TILE_SIZE, 0.3, tunnel_depth)
-			roof_col.shape = roof_box
-			roof_body.add_child(roof_col)
-			roof_body.position = Vector3(center_x, base_y + arch_height + 0.15, center_z)
-			level_node.add_child(roof_body)
+func _create_shader_warmup():
+	# Draws every shader variant behind the GET READY gate so nothing compiles
+	# mid-round (see shader_warmup.gd).
+	_warmup = ShaderWarmup.build_rig()
+	_camera.add_child(_warmup)
 
 func _unhandled_input(event):
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -1427,208 +1574,9 @@ func _close_share_dialog():
 		_share_panel = null
 		_share_text = null
 
-func _generate_endless_chunk():
-	var params: Dictionary = GameState.endless_params.duplicate()
-	params["seed"] = randi()
-	params["length"] = 200
-	var content := LevelGenerator.generate(params)
-	var lines := content.split("\n")
-	while lines.size() > 0 and lines[-1].strip_edges() == "":
-		lines.remove_at(lines.size() - 1)
-
-	var level_node := $Level
-	var row_offset := _endless_generated_rows
-	var chunk_rows := lines.size()
-	_endless_generated_rows += chunk_rows
-	_level_end_z = -(_endless_generated_rows + 24) * TILE_SIZE
-
-	var cols := 10
-	var group_colors := [
-		Color(0.4, 0.65, 1.0), Color(0.7, 0.4, 0.9),
-		Color(1.0, 0.6, 0.25), Color(0.4, 0.9, 0.6),
-	]
-	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
-
-	var height_materials: Dictionary = {}
-	for h in range(1, 10):
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = base_color * (1.2 + (h - 1) * 0.1)
-		mat.albedo_color.a = 1.0
-		mat.emission_enabled = true
-		mat.emission = base_color * 0.3
-		mat.emission_energy_multiplier = 0.5
-		height_materials[h] = mat
-
-	var tunnel_wall_mat := StandardMaterial3D.new()
-	tunnel_wall_mat.albedo_color = base_color.darkened(0.4)
-	tunnel_wall_mat.emission_enabled = true
-	tunnel_wall_mat.emission = base_color * 0.1
-	tunnel_wall_mat.emission_energy_multiplier = 0.3
-	tunnel_wall_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-
-	# Parse chunk
-	var grid: Array[Array] = []
-	var tunnels_arr: Array[Array] = []
-	for r in chunk_rows:
-		var floor_row: Array[int] = []
-		floor_row.resize(cols)
-		floor_row.fill(0)
-		var tunnel_row: Array[bool] = []
-		tunnel_row.resize(cols)
-		tunnel_row.fill(false)
-		var line := lines[r]
-		for ci in range(0, line.length(), 2):
-			var tile_idx := ci / 2
-			if tile_idx >= cols:
-				break
-			var h_char := line[ci]
-			var m_char := line[ci + 1] if ci + 1 < line.length() else "."
-			if h_char >= "1" and h_char <= "9":
-				floor_row[tile_idx] = h_char.unicode_at(0) - "0".unicode_at(0)
-			if m_char == "T" or m_char == "t":
-				tunnel_row[tile_idx] = true
-		grid.append(floor_row)
-		tunnels_arr.append(tunnel_row)
-
-	for row in grid:
-		_grid.append(row)
-	for row in tunnels_arr:
-		_tunnels.append(row)
-
-	# Build floor tiles (simple per-tile, no greedy merge for chunks)
-	for r in chunk_rows:
-		for c in cols:
-			var height: int = grid[r][c]
-			if height == 0:
-				continue
-			var actual_height := height * TILE_HEIGHT
-			var tile := _create_merged_tile(1, 1, actual_height, height_materials[height])
-			tile.position = Vector3(
-				c * TILE_SIZE,
-				actual_height / 2.0,
-				-(row_offset + 24 + r) * TILE_SIZE
-			)
-			level_node.add_child(tile)
-
-	# Build tunnel arches
-	var t_used: Array[Array] = []
-	for r in chunk_rows:
-		var row: Array[bool] = []
-		row.resize(cols)
-		row.fill(false)
-		t_used.append(row)
-
-	for r in chunk_rows:
-		for c in cols:
-			if not tunnels_arr[r][c] or t_used[r][c] or grid[r][c] == 0:
-				continue
-			var floor_h: int = grid[r][c]
-			var depth := 0
-			while r + depth < chunk_rows and tunnels_arr[r + depth][c] and grid[r + depth][c] == floor_h and not t_used[r + depth][c]:
-				depth += 1
-			for rr in range(r, r + depth):
-				t_used[rr][c] = true
-
-			var base_y := floor_h * TILE_HEIGHT
-			var arch_height := 1.2
-			var half_w := TILE_SIZE / 2.0
-			var wall_thickness := 0.06
-			var center_x := c * TILE_SIZE
-			var center_z := -(row_offset + 24 + r) * TILE_SIZE - (depth - 1) * TILE_SIZE / 2.0
-			var tunnel_depth := depth * TILE_SIZE
-
-			var st := SurfaceTool.new()
-			st.begin(Mesh.PRIMITIVE_TRIANGLES)
-			var z_front := tunnel_depth / 2.0
-			var z_back := -tunnel_depth / 2.0
-			var arch_segments := 24
-			var min_y := 0.1
-			for seg in arch_segments:
-				var a0 := PI * float(seg) / float(arch_segments)
-				var a1 := PI * float(seg + 1) / float(arch_segments)
-				var x0 := -cos(a0) * half_w
-				var y0 := sin(a0) * arch_height
-				var x1 := -cos(a1) * half_w
-				var y1 := sin(a1) * arch_height
-				if y0 < min_y and y1 < min_y:
-					continue
-				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
-				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
-				var o0f := Vector3(x0, y0, z_front)
-				var o1f := Vector3(x1, y1, z_front)
-				var o0b := Vector3(x0, y0, z_back)
-				var o1b := Vector3(x1, y1, z_back)
-				var i0f := o0f - n0 * wall_thickness
-				var i1f := o1f - n1 * wall_thickness
-				var i0b := o0b - n0 * wall_thickness
-				var i1b := o1b - n1 * wall_thickness
-				st.set_normal(n0); st.add_vertex(o0f)
-				st.set_normal(n1); st.add_vertex(o1f)
-				st.set_normal(n0); st.add_vertex(o0b)
-				st.set_normal(n1); st.add_vertex(o1f)
-				st.set_normal(n1); st.add_vertex(o1b)
-				st.set_normal(n0); st.add_vertex(o0b)
-				st.set_normal(-n0); st.add_vertex(i0b)
-				st.set_normal(-n1); st.add_vertex(i1f)
-				st.set_normal(-n0); st.add_vertex(i0f)
-				st.set_normal(-n0); st.add_vertex(i0b)
-				st.set_normal(-n1); st.add_vertex(i1b)
-				st.set_normal(-n1); st.add_vertex(i1f)
-			for seg in arch_segments:
-				var a0 := PI * float(seg) / float(arch_segments)
-				var a1 := PI * float(seg + 1) / float(arch_segments)
-				var x0 := -cos(a0) * half_w
-				var y0 := sin(a0) * arch_height
-				var x1 := -cos(a1) * half_w
-				var y1 := sin(a1) * arch_height
-				if y0 < min_y and y1 < min_y:
-					continue
-				var n0 := Vector3(-cos(a0), sin(a0), 0).normalized()
-				var n1 := Vector3(-cos(a1), sin(a1), 0).normalized()
-				var o0 := Vector3(x0, y0, 0)
-				var o1 := Vector3(x1, y1, 0)
-				var i0 := o0 - n0 * wall_thickness
-				var i1 := o1 - n1 * wall_thickness
-				var fz := Vector3(0, 0, z_front)
-				var fn := Vector3(0, 0, 1)
-				st.set_normal(fn); st.add_vertex(o0 + fz)
-				st.set_normal(fn); st.add_vertex(i1 + fz)
-				st.set_normal(fn); st.add_vertex(i0 + fz)
-				st.set_normal(fn); st.add_vertex(o0 + fz)
-				st.set_normal(fn); st.add_vertex(o1 + fz)
-				st.set_normal(fn); st.add_vertex(i1 + fz)
-				var bz := Vector3(0, 0, z_back)
-				var bn := Vector3(0, 0, -1)
-				st.set_normal(bn); st.add_vertex(i0 + bz)
-				st.set_normal(bn); st.add_vertex(i1 + bz)
-				st.set_normal(bn); st.add_vertex(o0 + bz)
-				st.set_normal(bn); st.add_vertex(o1 + bz)
-				st.set_normal(bn); st.add_vertex(o0 + bz)
-				st.set_normal(bn); st.add_vertex(i1 + bz)
-			var arch_mesh := st.commit()
-			arch_mesh.surface_set_material(0, tunnel_wall_mat)
-			var arch_body := StaticBody3D.new()
-			arch_body.set_meta("tunnel_wall", true)
-			var mesh_inst := MeshInstance3D.new()
-			mesh_inst.mesh = arch_mesh
-			arch_body.add_child(mesh_inst)
-			var trimesh_shape := arch_mesh.create_trimesh_shape()
-			var col_shape := CollisionShape3D.new()
-			col_shape.shape = trimesh_shape
-			arch_body.add_child(col_shape)
-			arch_body.position = Vector3(center_x, base_y, center_z)
-			level_node.add_child(arch_body)
-			var roof_body := StaticBody3D.new()
-			roof_body.set_meta("tunnel_wall", true)
-			var roof_col := CollisionShape3D.new()
-			var roof_box := BoxShape3D.new()
-			roof_box.size = Vector3(TILE_SIZE, 0.3, tunnel_depth)
-			roof_col.shape = roof_box
-			roof_body.add_child(roof_col)
-			roof_body.position = Vector3(center_x, base_y + arch_height + 0.15, center_z)
-			level_node.add_child(roof_body)
 
 func _create_warp_streaks():
+	PerfMonitor.mark("warp_streaks")
 	var streak_mat := StandardMaterial3D.new()
 	streak_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	streak_mat.albedo_color = Color(0.8, 0.9, 1.0)
@@ -1641,6 +1589,10 @@ func _create_warp_streaks():
 	var cam_right := _camera.global_basis.x
 	var cam_up := _camera.global_basis.y
 
+	var streak_mesh := BoxMesh.new()
+	streak_mesh.size = Vector3(0.05, 0.05, 1.0)
+	streak_mesh.material = streak_mat
+
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 77
 	for i in 100:
@@ -1651,17 +1603,15 @@ func _create_warp_streaks():
 		var pos := cam_pos + cam_fwd * depth + cam_right * cos(angle) * radius + cam_up * sin(angle) * radius
 
 		var streak := MeshInstance3D.new()
-		var mesh := BoxMesh.new()
-		mesh.size = Vector3(0.05, 0.05, 1.0)
-		mesh.material = streak_mat
-		streak.mesh = mesh
+		streak.mesh = streak_mesh
+		add_child(streak)
 		streak.global_position = pos
 		streak.look_at(cam_pos)
-		add_child(streak)
+		streak.reset_physics_interpolation()
 
 		var duration := rng.randf_range(0.6, 1.6)
 		var stretch := rng.randf_range(30.0, 80.0)
-		var tween := create_tween()
+		var tween := create_tween().set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
 		tween.tween_property(streak, "scale:z", stretch, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 func _on_ship_warped():
@@ -1675,7 +1625,16 @@ func _on_ship_exploded():
 		GameState.save_endless_best(dist)
 	GameState.elapsed_time = 0.0
 	_timer_running = false
+	if GameState.is_endless:
+		# Passed track has been freed, so start a fresh run on a new track
+		_reset_endless_track()
 	_ship.reset_ship()
+
+func _reset_endless_track():
+	var params: Dictionary = GameState.endless_params.duplicate()
+	params["seed"] = randi()
+	params["length"] = 300
+	_start_track(LevelGenerator.generate(params))
 
 func _create_merged_tile(tiles_wide: int, tiles_deep: int, height: float, material: StandardMaterial3D) -> StaticBody3D:
 	var body := StaticBody3D.new()

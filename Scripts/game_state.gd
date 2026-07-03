@@ -1,5 +1,10 @@
 extends Node
 
+# Held here so the textures stay cached for the whole session instead of
+# being re-decoded on every scene change.
+var cockpit_texture: Texture2D = preload("res://cockpit.png")
+var background_texture: Texture2D = preload("res://background.png")
+
 var selected_level := "res://Levels/level1.txt"
 var selected_group := 0
 var selected_track := 0
@@ -26,13 +31,29 @@ func _ready():
 	_load()
 	_build_status_overlay()
 
+var _status_init := false
+var _s_music := false
+var _s_sfx := true
+var _s_mode := false
+var _s_ap := false
+
 func _process(_delta):
-	if _status_label:
-		var music_str := "ON" if Music._enabled else "OFF"
-		var sfx_str := "ON" if sfx_enabled else "OFF"
-		var mode_str := "Classical" if classical_mode else "Normal"
-		var ap_str := " | AUTOPILOT" if autopilot else ""
-		_status_label.text = "Music: %s | Sounds: %s | Mode: %s%s" % [music_str, sfx_str, mode_str, ap_str]
+	if _status_label == null:
+		return
+	# Rebuild the status line only when a flag actually changed
+	if _status_init and Music._enabled == _s_music and sfx_enabled == _s_sfx \
+			and classical_mode == _s_mode and autopilot == _s_ap:
+		return
+	_status_init = true
+	_s_music = Music._enabled
+	_s_sfx = sfx_enabled
+	_s_mode = classical_mode
+	_s_ap = autopilot
+	var music_str := "ON" if _s_music else "OFF"
+	var sfx_str := "ON" if _s_sfx else "OFF"
+	var mode_str := "Classical" if _s_mode else "Normal"
+	var ap_str := " | AUTOPILOT" if _s_ap else ""
+	_status_label.text = "Music: %s | Sounds: %s | Mode: %s%s" % [music_str, sfx_str, mode_str, ap_str]
 
 func _input(event):
 	if event is InputEventKey and event.pressed and not event.echo:

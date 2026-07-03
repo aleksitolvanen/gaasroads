@@ -271,9 +271,9 @@ func _update_selection():
 
 func _build_menu():
 	# Background
-	if ResourceLoader.exists("res://background.png"):
+	if GameState.background_texture:
 		var bg := TextureRect.new()
-		bg.texture = load("res://background.png")
+		bg.texture = GameState.background_texture
 		bg.anchor_right = 1
 		bg.anchor_bottom = 1
 		bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
