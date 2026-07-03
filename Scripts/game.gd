@@ -69,13 +69,9 @@ func _ready():
 	_ship.warped.connect(_on_ship_warped)
 	_ship.exploded.connect(_on_ship_exploded)
 
-	match GameState.selected_group:
-		2: # Solar Burn - low gravity
-			_ship.gravity = 12.0
-			_ship.jump_velocity = 10.0
-		3: # Dark Matter - low gravity, floaty jumps
-			_ship.gravity = 8.0
-			_ship.jump_velocity = 7.8
+	var grp := clampi(GameState.selected_group, 0, 3)
+	_ship.gravity = LevelGenerator.GROUP_GRAVITY[grp]
+	_ship.jump_velocity = LevelGenerator.GROUP_JUMP_VELOCITY[grp]
 	_camera = $Camera3D
 	# Run after the ship's physics tick so the camera follows its fresh position
 	process_physics_priority = 1

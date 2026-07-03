@@ -2,6 +2,12 @@ class_name LevelGenerator
 
 const W := 10
 
+# Per-group ship physics (Cosmic, Nebula, Solar, Dark). Lives here rather
+# than in an autoload so this class stays usable from headless -s scripts;
+# the ship setup reads these too.
+const GROUP_GRAVITY: Array[float] = [20.0, 20.0, 12.0, 8.0]
+const GROUP_JUMP_VELOCITY: Array[float] = [8.0, 8.0, 10.0, 7.8]
+
 static func generate(p: Dictionary) -> String:
 	var state := chunk_begin(p)
 	var rows: Array[String] = []
@@ -15,7 +21,19 @@ static func generate(p: Dictionary) -> String:
 static func chunk_begin(p: Dictionary) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = p.get("seed", randi())
-	return {"rng": rng, "p": p, "rows": 0, "target": p.get("length", 200), "started": false, "done": false}
+	var theme: int = clampi(p.get("theme", 0), 0, 3)
+	var grav: float = GROUP_GRAVITY[theme]
+	var jv: float = GROUP_JUMP_VELOCITY[theme]
+	# Completability limits from the group's jump physics (tile height 0.5):
+	# entry_h = tallest floor jumpable from the height-1 flats between
+	# segments (jump peak jv^2/2g, 15% margin for the crossing window);
+	# air_time = full flat-ground jump duration, bounds gap widths.
+	var jump_peak := jv * jv / (2.0 * grav)
+	var lim := {
+		"entry_h": 1 + maxi(1, int(jump_peak * 0.85 / 0.5)),
+		"air_time": 2.0 * jv / grav,
+	}
+	return {"rng": rng, "p": p, "lim": lim, "rows": 0, "target": p.get("length", 200), "started": false, "done": false}
 
 static func chunk_next(state: Dictionary) -> Array[String]:
 	var rng: RandomNumberGenerator = state.rng
@@ -29,6 +47,7 @@ static func chunk_next(state: Dictionary) -> Array[String]:
 	var tlw: int = p.get("tunnel_lane_weight", 8)
 	var sharpness: float = p.get("sharpness", 0.15)
 
+	var lim: Dictionary = state.lim
 	var rows: Array[String] = []
 	if not state.started:
 		state.started = true
@@ -39,18 +58,30 @@ static func chunk_next(state: Dictionary) -> Array[String]:
 		var st := _pick(rng, tw, nw, gw, tlw, prog)
 		var sl := rng.randi_range(10, 25 + int(prog * 10))
 		match st:
-			0: _wide(rng, rows, sl, min_h, max_h, prog)
-			1: _narrow(rng, rows, sl, min_h, max_h, sharpness)
-			2: _three(rng, rows, sl, min_h, max_h, sharpness)
-			3: _tunnel(rng, rows, sl, min_h, max_h)
-			4: _chicane(rng, rows, sl, min_h, max_h, sharpness)
-			5: _gaps(rng, rows, sl, min_h, max_h, prog)
-			6: _tunnel_lane(rng, rows, sl, min_h, max_h, sharpness)
+			0: _wide(rng, rows, sl, min_h, max_h, prog, lim)
+			1: _narrow(rng, rows, sl, min_h, max_h, sharpness, lim)
+			2: _three(rng, rows, sl, min_h, max_h, sharpness, lim)
+			3: _tunnel(rng, rows, sl, min_h, max_h, lim)
+			4: _chicane(rng, rows, sl, min_h, max_h, sharpness, lim)
+			5: _gaps(rng, rows, sl, min_h, max_h, prog, lim)
+			6: _tunnel_lane(rng, rows, sl, min_h, max_h, sharpness, lim)
 	else:
 		_add_flat(rows, 1, 6)
 		state.done = true
 	state.rows += rows.size()
 	return rows
+
+# Starting height for a segment entered from the height-1 flats
+static func _entry_h(rng: RandomNumberGenerator, min_h: int, max_h: int, lim: Dictionary) -> int:
+	var cap: int = lim.entry_h
+	return rng.randi_range(min_h, maxi(min_h, mini(max_h, cap)))
+
+static func _max_gap_rows(runup_rows: int, lim: Dictionary) -> int:
+	# Top speed reachable over the run-up from a standstill (accel 12,
+	# max speed 30), then rows crossed in one full jump, minus a landing row
+	var v := minf(30.0, sqrt(2.0 * 12.0 * float(runup_rows) * 2.0))
+	var air_time: float = lim.air_time
+	return maxi(1, int(v * air_time / 2.0) - 1)
 
 static func _e() -> Array:
 	var r := []
@@ -113,13 +144,16 @@ static func _gradual_shift(rng: RandomNumberGenerator, rows: Array, from_pos: in
 		_f(r, lo, hi, h)
 		rows.append(_s(r))
 
-static func _wide(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, prog: float):
+static func _wide(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, prog: float, lim: Dictionary):
 	var w := rng.randi_range(maxi(5, 8 - int(prog * 4)), W)
 	var off := rng.randi_range(0, W - w)
-	var h := rng.randi_range(min_h, max_h)
-	for _i in sl:
+	var h := _entry_h(rng, min_h, max_h, lim)
+	for i in sl:
 		if rng.randf() < 0.12:
-			h = _ch(rng, h, min_h, max_h)
+			var nh := _ch(rng, h, min_h, max_h)
+			# First row enters from the flats - can't exceed the entry clamp
+			if i > 0 or nh <= h:
+				h = nh
 		var r := _e()
 		_f(r, off, off + w, h)
 		if rng.randf() < 0.05 + prog * 0.12:
@@ -129,15 +163,17 @@ static func _wide(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, 
 				r[gp + 1] = ".."
 		rows.append(_s(r))
 
-static func _narrow(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float):
+static func _narrow(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float, lim: Dictionary):
 	var lw := 1 if rng.randf() < 0.5 else 2
 	var positions := [0, 1, (W - lw) / 2, W - lw - 1, W - lw]
 	var pos: int = positions[rng.randi() % positions.size()]
-	var h := rng.randi_range(min_h, max_h)
+	var h := _entry_h(rng, min_h, max_h, lim)
 	var shift_at := rng.randi_range(sl / 3, sl * 2 / 3)
 	for i in sl:
 		if rng.randf() < 0.06:
-			h = _ch(rng, h, min_h, max_h)
+			var nh := _ch(rng, h, min_h, max_h)
+			if i > 0 or nh <= h:
+				h = nh
 		var r := _e()
 		_f(r, pos, pos + lw, h)
 		rows.append(_s(r))
@@ -151,13 +187,15 @@ static func _narrow(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int
 				_gradual_shift(rng, rows, pos, new_pos, lw, h, sharpness)
 				pos = new_pos
 
-static func _three(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float):
+static func _three(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float, lim: Dictionary):
 	var lp := [0, 4 + rng.randi_range(-1, 1), W - 1]
-	var hs := [rng.randi_range(min_h, max_h), rng.randi_range(min_h, max_h), rng.randi_range(min_h, max_h)]
-	for _i in sl:
+	var hs := [_entry_h(rng, min_h, max_h, lim), _entry_h(rng, min_h, max_h, lim), _entry_h(rng, min_h, max_h, lim)]
+	for i in sl:
 		for j in 3:
 			if rng.randf() < 0.05:
-				hs[j] = _ch(rng, hs[j], min_h, max_h)
+				var nh := _ch(rng, hs[j], min_h, max_h)
+				if i > 0 or nh <= hs[j]:
+					hs[j] = nh
 		var r := _e()
 		for j in 3:
 			_f(r, lp[j], lp[j] + 1, hs[j])
@@ -166,10 +204,10 @@ static func _three(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int,
 			_f(r, lp[j] + 1, lp[j + 1], mini(hs[j], hs[j + 1]))
 		rows.append(_s(r))
 
-static func _tunnel(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int):
+static func _tunnel(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, lim: Dictionary):
 	var tw := rng.randi_range(2, 4)
 	var tp := rng.randi_range(0, W - tw)
-	var h := rng.randi_range(min_h, mini(max_h, 4))
+	var h := _entry_h(rng, min_h, mini(max_h, 4), lim)
 	for _i in 3:
 		var r := _e()
 		_f(r, maxi(0, tp - 2), mini(W, tp + tw + 2), h)
@@ -183,13 +221,13 @@ static func _tunnel(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int
 		_f(r, maxi(0, tp - 2), mini(W, tp + tw + 2), h)
 		rows.append(_s(r))
 
-static func _chicane(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float):
+static func _chicane(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float, lim: Dictionary):
 	var lw := rng.randi_range(2, 3)
 	var lpos := rng.randi_range(0, 2)
 	var rpos := rng.randi_range(W - lw - 2, W - lw)
 	var positions := [lpos, rpos]
 	var cur := rng.randi() % 2
-	var h := rng.randi_range(min_h, max_h)
+	var h := _entry_h(rng, min_h, max_h, lim)
 	var seg := rng.randi_range(4, 7)
 	var count := 0
 	for _i in sl:
@@ -204,9 +242,9 @@ static func _chicane(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: in
 			_gradual_shift(rng, rows, old_pos, positions[cur], lw, h, sharpness)
 			seg = rng.randi_range(3, 7)
 
-static func _tunnel_lane(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float):
+static func _tunnel_lane(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, sharpness: float, lim: Dictionary):
 	var pos := rng.randi_range(1, W - 2)
-	var h := rng.randi_range(min_h, mini(max_h, 3))
+	var h := _entry_h(rng, min_h, mini(max_h, 3), lim)
 	# Lead-in: narrow lane
 	var lead := rng.randi_range(4, 8)
 	for _i in lead:
@@ -240,21 +278,32 @@ static func _tunnel_lane(rng: RandomNumberGenerator, rows: Array, sl: int, min_h
 			_f(r, new_pos, new_pos + 1, h)
 			rows.append(_s(r))
 
-static func _gaps(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, prog: float):
+static func _gaps(rng: RandomNumberGenerator, rows: Array, sl: int, min_h: int, max_h: int, prog: float, lim: Dictionary):
 	var pw := rng.randi_range(maxi(3, 6 - int(prog * 3)), 8)
 	var off := rng.randi_range(0, W - pw)
-	var h := rng.randi_range(min_h, max_h)
+	var h := _entry_h(rng, min_h, max_h, lim)
+	var runup := 2  # the flats before each segment count toward take-off speed
 	var i := 0
 	while i < sl:
 		var pl := rng.randi_range(3, 6)
+		var first := true
 		for _j in mini(pl, sl - i):
 			if rng.randf() < 0.08:
-				h = _ch(rng, h, min_h, max_h)
+				var nh := _ch(rng, h, min_h, max_h)
+				# No step up on the landing row - one jump can't cross and climb
+				if nh <= h or not first:
+					h = nh
 			var r := _e()
 			_f(r, off, off + pw, h)
 			rows.append(_s(r))
 			i += 1
+			runup += 1
+			first = false
+		if i >= sl:
+			break
 		var gl := rng.randi_range(1, mini(3, 1 + int(prog * 2)))
+		gl = mini(gl, _max_gap_rows(runup, lim))
 		for _j in mini(gl, sl - i):
 			rows.append(_s(_e()))
 			i += 1
+		runup = 0

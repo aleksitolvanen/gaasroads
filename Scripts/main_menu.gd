@@ -163,6 +163,7 @@ func _start_game():
 			"gap_weight": CUSTOM_OPTIONS[5][GameState.custom_idx[5]],
 			"tunnel_lane_weight": CUSTOM_OPTIONS[6][GameState.custom_idx[6]],
 			"sharpness": CUSTOM_OPTIONS[7][GameState.custom_idx[7]],
+			"theme": CUSTOM_OPTIONS[4][GameState.custom_idx[4]],
 			"seed": randi(),
 		}
 		GameState.selected_group = CUSTOM_OPTIONS[4][GameState.custom_idx[4]]
