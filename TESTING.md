@@ -1,0 +1,132 @@
+# Testing
+
+Headless tests for physics, level generation, and level completability.
+
+**Prerequisites**: Godot 4.6 (the plain build, not mono, if you also want to
+export) and Python 3.10+. The commands below assume `godot` on PATH —
+substitute the full path to the editor binary. All commands run from the
+repo root.
+
+## Test inventory
+
+### 1. Autopilot regression — `Scripts/test_autopilot.gd`
+
+Self-contained simulation of the heuristic autopilot against the first two
+authored levels of each group.
+
+    godot --headless --path . -s Scripts/test_autopilot.gd
+
+Prints a per-level result and a success rate. This tests the *autopilot
+heuristic*, not level completability — a failure here means the autopilot is
+weak, not that the level is broken (use the solver for that).
+
+### 2. Generator constraints — `tests/gen_constraints.gd`
+
+Generates 320 tracks (80 per theme) at maximum difficulty settings and
+statically verifies the invariants the generator guarantees: climbable steps,
+gaps within the run-up/air-time budget, landings at or below takeoff height.
+
+    godot --headless --path . -s tests/gen_constraints.gd
+
+Pass: `checked 320 tracks, 0 violations`. The limit formulas in this script
+mirror `LevelGenerator.chunk_begin()` — when you change one, change both.
+
+### 3. Gameplay smokes — `tests/smoke_*.gd`
+
+End-to-end scene tests: build pipeline, GET READY gating, music playback,
+endless chunking/cleanup/death-reset.
+
+    godot --headless --path . -s tests/smoke_music.gd
+    godot --headless --path . -s tests/smoke_dark.gd
+    godot --headless --path . -s tests/smoke_endless.gd
+
+Each prints `... SMOKE OK` on success.
+
+### 4. Reachability solver — `solve_level.py`
+
+Proves whether a level can be completed by searching the full input space
+against a Python port of the ship physics. `COMPLETABLE` always comes with a
+working input tape and is trustworthy; `LIKELY NOT COMPLETABLE` /
+`UNDECIDED` are budget-relative (see caveats).
+
+    python solve_level.py                          # all Levels/*.txt
+    python solve_level.py Levels/nebula_1.txt --budget 120
+    python solve_level.py track.txt --theme 2 --tape tape.txt
+
+Flags:
+
+| Flag | Meaning |
+|---|---|
+| `--theme N` | 0 Cosmic, 1 Nebula, 2 Solar, 3 Dark (default: from filename prefix) |
+| `--budget S` | wall-clock seconds per level (default 60) |
+| `--k N` | ticks each input is held; 3 = 20 Hz decisions (lower = superhuman precision) |
+| `--stall N` | expansions without frontier progress before giving up (default 400k) |
+| `--exploits` | allow the banked air-jump (physics as shipped; default models intended physics) |
+| `--tape F` | write the winning input tape (`W/S` + `A/D` + `J` per line) |
+
+Expected: all 20 authored levels report `COMPLETABLE` within seconds.
+
+**Caveats**: routes that need deep movement tech (bounce chains, coyote-delay
+jumps) can hide behind millions of states — before trusting a "no" on a
+suspicious level, retry with `--stall 5000000 --budget 600`. State bucketing
+can in principle cause a false "no", never a false "yes".
+
+### 5. Adversarial probes — `tests/make_adversarial.py`
+
+Corner-case levels for validating the *solver* (and for documenting what the
+movement system really allows):
+
+    python tests/make_adversarial.py
+    python solve_level.py tests/adversarial/wall_h4.txt --theme 0 --budget 120
+
+Expected verdicts under current mechanics (theme 0 unless noted):
+
+| Level | Verdict | Why |
+|---|---|---|
+| wall_h4 | COMPLETABLE | 1.5u step, apex crossing at low speed |
+| wall_h5 | COMPLETABLE | 2.0u step — bounce + coyote-window jump |
+| gap_20 | LIKELY NOT | 40u gap, beyond all known tech (~29u) |
+| pogo | COMPLETABLE | 1-row pad between gaps, bounce-touch chaining |
+| lateral_ok / lateral_far | COMPLETABLE both | far variant needs lip-bounce double-arc drift |
+| zigzag | COMPLETABLE | corner-to-corner tiles are drivable slowly |
+| tunnel_ok | COMPLETABLE | positive control: forced flat tunnel |
+| tunnel_climb | LIKELY NOT | height step inside a tunnel; no jumping under the roof |
+| speed_tight / speed_ok | COMPLETABLE both | tight variant works via bounce-touch (no deceleration on pads) |
+| bounce_gate | COMPLETABLE | needs `--stall 5000000 --budget 600`; coyote-delayed ledge jump |
+
+If a verdict here changes after a mechanics tweak, that is the point — the
+table is a movement-tech regression snapshot, not a pass/fail suite.
+
+## When game mechanics change
+
+The ship physics is intentionally mirrored in several places. Change one,
+sync the rest, rerun everything:
+
+| What changed | Update |
+|---|---|
+| Ship movement (`Scripts/ship.gd`: accel, max/lateral speed, bounce, coyote rule, jump handling) | `solve_level.py` header constants + `tick()` logic; gap/step formulas in `LevelGenerator.chunk_begin()` and `tests/gen_constraints.gd` |
+| Per-group gravity/jump | `LevelGenerator.GROUP_GRAVITY` / `GROUP_JUMP_VELOCITY` (single source for game + generator), and the same two arrays in `solve_level.py` |
+| Ship collision box (`Scenes/Ship.tscn`) | `HALF_W/HALF_L/HALF_H` in `solve_level.py` |
+| Tile size / tunnel arch geometry (`Scripts/game.gd`) | `TUNNEL_OPEN` / `TUNNEL_CEIL` and tile math in `solve_level.py`; `TILE_SIZE`-derived constants in `Scripts/test_autopilot.gd` |
+| Generator segment shapes | invariants in `tests/gen_constraints.gd` |
+
+Then, in order:
+
+1. `godot --headless --path . -s tests/gen_constraints.gd` — generator still
+   provably fair under the new physics.
+2. `python solve_level.py` — all authored levels still completable. If one
+   fails, the report names the row where every path dies; fix the level or
+   the physics.
+3. `python tests/make_adversarial.py` + spot-check the table above — shows
+   what the new movement tech allows; update the table.
+4. The smokes, for general breakage.
+
+The solver's `tick()` is ~100 lines and is the ground-truth mirror of
+`ship.gd::_physics_process` — when in doubt, diff those two side by side.
+
+## Music and web build
+
+- `python bake_music.py` — regenerates `Music/*.ogg` after editing the
+  patterns in it (requires ffmpeg).
+- `python serve_web.py` — serves `Builds/` with the cross-origin isolation
+  headers the threaded web export needs (see README).

@@ -37,3 +37,8 @@ which requires a cross-origin-isolated page:
 - On itch.io, enable **SharedArrayBuffer support** in the project's embed options
 
 Music tracks in `Music/` are baked with `python bake_music.py` (needs ffmpeg).
+
+## Testing
+
+Headless tests (physics smokes, generator fairness, level completability
+solver) are documented in [TESTING.md](TESTING.md).
