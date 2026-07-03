@@ -25,3 +25,15 @@ Web version: https://needlefi.itch.io/gaasroads
 - Arrow keys: steer left/right, speed up/down
 - Space: jump
 - Escape: back to menu
+
+## Web build
+
+The Web export preset uses thread support (audio mixes off the main thread),
+which requires a cross-origin-isolated page:
+
+- Export the `Web` preset into `Builds/`, then package with `package-web.ps1`
+- Test locally with `python serve_web.py` (plain file serving won't boot the
+  threaded build - the script adds the required COOP/COEP headers)
+- On itch.io, enable **SharedArrayBuffer support** in the project's embed options
+
+Music tracks in `Music/` are baked with `python bake_music.py` (needs ffmpeg).
