@@ -308,7 +308,9 @@ func _physics_process(delta):
 		_vertical_velocity -= gravity * delta
 	var near_floor: bool
 	if GameState.classical_mode:
-		near_floor = is_on_floor() or (global_position.y < _last_floor_y + 0.4 and _vertical_velocity < 0)
+		# vy floor expires the window shortly into a fall - without it, y
+		# stays below last_floor forever and jump-hammering flies over gaps
+		near_floor = is_on_floor() or (global_position.y < _last_floor_y + 0.4 and _vertical_velocity < 0 and _vertical_velocity > -2.5)
 	else:
 		near_floor = is_on_floor() or (global_position.y < _last_floor_y + 0.55 and _vertical_velocity > -2.5)
 	var can_jump_now := _can_jump or near_floor
