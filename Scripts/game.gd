@@ -1455,6 +1455,38 @@ func _build_arch_job(level_node: Node3D, job: Array):
 		_spawned_track.append([arch_body, end_z])
 		_spawned_track.append([roof_body, end_z])
 
+# Panel texture shared by all track materials: dark border frame, bevel
+# ring, faint noise. World-triplanar mapping repeats it once per 2u tile,
+# so merged tile runs still read as individual tiles - the SkyRoads grid.
+func _make_tile_texture() -> ImageTexture:
+	var size := 64
+	var img := Image.create(size, size, false, Image.FORMAT_RGB8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for y in size:
+		for x in size:
+			var edge := mini(mini(x, size - 1 - x), mini(y, size - 1 - y))
+			var v := 1.0
+			if edge == 0:
+				v = 0.55
+			elif edge == 1:
+				v = 0.7
+			elif edge <= 3:
+				v = 0.88
+			v -= rng.randf() * 0.05
+			img.set_pixel(x, y, Color(v, v, v))
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+func _apply_tile_texture(mat: StandardMaterial3D, tex: ImageTexture):
+	mat.albedo_texture = tex
+	mat.uv1_triplanar = true
+	mat.uv1_world_triplanar = true
+	# period 2u (one tile), offset half a period so borders land on tile
+	# edges (odd world coords), not tile centers
+	mat.uv1_scale = Vector3(0.5, 0.5, 0.5)
+	mat.uv1_offset = Vector3(0.5, 0.5, 0.5)
+
 func _init_track_materials():
 	var group_colors := [
 		Color(0.4, 0.65, 1.0),
@@ -1463,6 +1495,7 @@ func _init_track_materials():
 		Color(0.3, 0.68, 0.45),
 	]
 	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
+	var tile_tex := _make_tile_texture()
 
 	# Dark Matter stays murky: weakest self-glow of all themes
 	var glow := 0.28 if GameState.selected_group == 3 else 0.4
@@ -1474,6 +1507,7 @@ func _init_track_materials():
 		mat.emission_enabled = true
 		mat.emission = base_color * 0.3
 		mat.emission_energy_multiplier = glow
+		_apply_tile_texture(mat, tile_tex)
 		_height_materials[h] = mat
 
 	_tunnel_wall_mat = StandardMaterial3D.new()
@@ -1482,6 +1516,7 @@ func _init_track_materials():
 	_tunnel_wall_mat.emission = base_color * 0.1
 	_tunnel_wall_mat.emission_energy_multiplier = 0.3
 	_tunnel_wall_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_apply_tile_texture(_tunnel_wall_mat, tile_tex)
 
 func _free_passed_track(ship_z: float):
 	var keep: Array = []

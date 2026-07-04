@@ -11,10 +11,21 @@ var _materials: Array[StandardMaterial3D] = []
 var _particle_mat: StandardMaterial3D
 
 func _ready():
-	var shaded := StandardMaterial3D.new()  # tiles, tunnel walls, engine glow
+	var shaded := StandardMaterial3D.new()  # engine glow, canopy
 	shaded.emission_enabled = true
 	shaded.emission = Color(0.1, 0.1, 0.2)
 	_materials.append(shaded)
+
+	# tiles and tunnel walls: emissive + world-triplanar albedo texture
+	var tiled := StandardMaterial3D.new()
+	var timg := Image.create(4, 4, false, Image.FORMAT_RGB8)
+	timg.fill(Color.WHITE)
+	tiled.albedo_texture = ImageTexture.create_from_image(timg)
+	tiled.uv1_triplanar = true
+	tiled.uv1_world_triplanar = true
+	tiled.emission_enabled = true
+	tiled.emission = Color(0.1, 0.1, 0.2)
+	_materials.append(tiled)
 
 	var plain := StandardMaterial3D.new()  # ship body, wings, nose
 	_materials.append(plain)

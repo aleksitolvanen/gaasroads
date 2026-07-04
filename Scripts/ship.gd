@@ -72,12 +72,39 @@ func _generate_sound(start_freq: float, end_freq: float, duration: float) -> Aud
 	stream.data = data
 	return stream
 
+func _part(mesh: Mesh, pos: Vector3, rot_deg := Vector3.ZERO, scl := Vector3.ONE) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	m.mesh = mesh
+	m.position = pos
+	m.rotation_degrees = rot_deg
+	m.scale = scl
+	add_child(m)
+	_ship_parts.append(m)
+	return m
+
 func _build_ship_mesh():
 	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.7, 0.1, 0.1)
+	body_mat.albedo_color = Color(0.72, 0.12, 0.12)
+	body_mat.metallic = 0.35
+	body_mat.roughness = 0.45
 
 	var accent_mat := StandardMaterial3D.new()
 	accent_mat.albedo_color = Color(0.85, 0.85, 0.9)
+	accent_mat.metallic = 0.5
+	accent_mat.roughness = 0.35
+
+	var dark_mat := StandardMaterial3D.new()
+	dark_mat.albedo_color = Color(0.16, 0.16, 0.2)
+	dark_mat.metallic = 0.6
+	dark_mat.roughness = 0.5
+
+	var canopy_mat := StandardMaterial3D.new()
+	canopy_mat.albedo_color = Color(0.2, 0.45, 0.6)
+	canopy_mat.metallic = 0.8
+	canopy_mat.roughness = 0.15
+	canopy_mat.emission_enabled = true
+	canopy_mat.emission = Color(0.1, 0.3, 0.45)
+	canopy_mat.emission_energy_multiplier = 0.6
 
 	_engine_mat = StandardMaterial3D.new()
 	_engine_mat.albedo_color = Color(0.05, 0.05, 0.05)
@@ -87,51 +114,65 @@ func _build_ship_mesh():
 
 	_ship_parts.clear()
 
-	# Main body - shorter, same width
-	var body := MeshInstance3D.new()
-	var body_mesh := BoxMesh.new()
-	body_mesh.size = Vector3(0.7, 0.25, 1.0)
-	body_mesh.material = body_mat
-	body.mesh = body_mesh
-	add_child(body)
-	_ship_parts.append(body)
+	# Fuselage: flattened capsule, wide and low
+	var hull := CapsuleMesh.new()
+	hull.radius = 0.16
+	hull.height = 1.05
+	hull.material = body_mat
+	_part(hull, Vector3(0, 0, 0.02), Vector3(90, 0, 0), Vector3(1.5, 1.0, 0.75))
 
 	# Nose cone
-	var nose := MeshInstance3D.new()
-	var nose_mesh := BoxMesh.new()
-	nose_mesh.size = Vector3(0.35, 0.15, 0.3)
-	nose_mesh.material = accent_mat
-	nose.mesh = nose_mesh
-	nose.position = Vector3(0, 0.02, -0.55)
-	add_child(nose)
-	_ship_parts.append(nose)
+	var nose := CylinderMesh.new()
+	nose.top_radius = 0.0
+	nose.bottom_radius = 0.13
+	nose.height = 0.38
+	nose.radial_segments = 12
+	nose.material = accent_mat
+	_part(nose, Vector3(0, -0.01, -0.62), Vector3(-90, 0, 0), Vector3(1.5, 1.0, 0.7))
 
-	# Small wings
-	var wing_mesh := BoxMesh.new()
-	wing_mesh.size = Vector3(0.35, 0.04, 0.35)
-	wing_mesh.material = body_mat
+	# Cockpit canopy
+	var canopy := SphereMesh.new()
+	canopy.radius = 0.11
+	canopy.height = 0.22
+	canopy.material = canopy_mat
+	_part(canopy, Vector3(0, 0.12, -0.16), Vector3.ZERO, Vector3(1.1, 0.7, 1.7))
 
-	var left_wing := MeshInstance3D.new()
-	left_wing.mesh = wing_mesh
-	left_wing.position = Vector3(-0.4, -0.05, 0.15)
-	add_child(left_wing)
-	_ship_parts.append(left_wing)
+	# Swept wings with tip fins
+	var wing := BoxMesh.new()
+	wing.size = Vector3(0.5, 0.045, 0.34)
+	wing.material = body_mat
+	_part(wing, Vector3(-0.42, -0.03, 0.16), Vector3(0, -18, -4))
+	_part(wing, Vector3(0.42, -0.03, 0.16), Vector3(0, 18, 4))
+	var fin := BoxMesh.new()
+	fin.size = Vector3(0.045, 0.15, 0.22)
+	fin.material = accent_mat
+	_part(fin, Vector3(-0.62, 0.03, 0.24), Vector3(0, -18, 0))
+	_part(fin, Vector3(0.62, 0.03, 0.24), Vector3(0, 18, 0))
 
-	var right_wing := MeshInstance3D.new()
-	right_wing.mesh = wing_mesh
-	right_wing.position = Vector3(0.4, -0.05, 0.15)
-	add_child(right_wing)
-	_ship_parts.append(right_wing)
+	# Twin engine pods with glow nozzles
+	var pod := CylinderMesh.new()
+	pod.top_radius = 0.085
+	pod.bottom_radius = 0.07
+	pod.height = 0.45
+	pod.radial_segments = 10
+	pod.material = dark_mat
+	_part(pod, Vector3(-0.24, -0.02, 0.36), Vector3(90, 0, 0))
+	_part(pod, Vector3(0.24, -0.02, 0.36), Vector3(90, 0, 0))
+	var nozzle := CylinderMesh.new()
+	nozzle.top_radius = 0.062
+	nozzle.bottom_radius = 0.062
+	nozzle.height = 0.05
+	nozzle.radial_segments = 10
+	nozzle.material = _engine_mat
+	_part(nozzle, Vector3(-0.24, -0.02, 0.6), Vector3(90, 0, 0))
+	_part(nozzle, Vector3(0.24, -0.02, 0.6), Vector3(90, 0, 0))
 
-	# Engine glow
-	var engine := MeshInstance3D.new()
-	var engine_mesh := BoxMesh.new()
-	engine_mesh.size = Vector3(0.4, 0.15, 0.12)
-	engine_mesh.material = _engine_mat
-	engine.mesh = engine_mesh
-	engine.position = Vector3(0, 0, 0.5)
-	add_child(engine)
-	_ship_parts.append(engine)
+	# Dorsal fin, apex leaning back
+	var dfin := PrismMesh.new()
+	dfin.size = Vector3(0.34, 0.2, 0.04)
+	dfin.left_to_right = 0.8
+	dfin.material = body_mat
+	_part(dfin, Vector3(0, 0.17, 0.3), Vector3(0, -90, 0))
 
 	# Exhaust - 2 layers with large overlapping billboard spheres
 	# Forms a dense short cone (~0.5 units = half ship length)
