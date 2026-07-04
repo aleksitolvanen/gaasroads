@@ -28,7 +28,12 @@ func _process(_delta) -> bool:
 		gs.is_generated = true
 		gs.is_endless = true
 		gs.endless_params = {"length": 300, "min_height": 1, "max_height": 1, "tunnel_weight": 30, "narrow_weight": 0, "gap_weight": 0, "tunnel_lane_weight": 20, "sharpness": 0.1, "theme": 0, "seed": 4242}
-		gs.generated_content = LevelGenerator.generate(gs.endless_params)
+		# find a seed whose track has tunnels, so arch jobs get exercised
+		while true:
+			gs.generated_content = LevelGenerator.generate(gs.endless_params)
+			if "T" in gs.generated_content:
+				break
+			gs.endless_params["seed"] += 1
 		gs.autopilot = true
 		change_scene_to_file("res://Scenes/Game.tscn")
 		return false

@@ -12,3 +12,5 @@ Thumbs.db
 
 # Generated test levels
 tests/adversarial/
+tests/samples/
+tests/skyroads/

@@ -141,6 +141,8 @@ func _process(delta):
 			var params: Dictionary = GameState.endless_params.duplicate()
 			params["seed"] = randi()
 			params["length"] = 200
+			# endless ramps up with distance survived
+			params["diff_boost"] = clampf(float(_grid.size()) / 2500.0, 0.0, 0.3)
 			_chunk_state = LevelGenerator.chunk_begin(params)
 		_cleanup_tick += 1
 		if _cleanup_tick >= 30:
