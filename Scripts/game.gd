@@ -293,16 +293,16 @@ func _create_space_environment():
 	match GameState.selected_group:
 		2:  # Solar - very dark ambient, sun does the work
 			env.ambient_light_color = Color(0.08, 0.06, 0.04)
-			env.ambient_light_energy = 0.4
+			env.ambient_light_energy = 0.35
 		1:  # Nebula
 			env.ambient_light_color = Color(0.12, 0.08, 0.15)
-			env.ambient_light_energy = 0.5
+			env.ambient_light_energy = 0.45
 		3:  # Dark Matter
 			env.ambient_light_color = Color(0.06, 0.1, 0.08)
-			env.ambient_light_energy = 0.45
+			env.ambient_light_energy = 0.28
 		_:  # Cosmic Highway
 			env.ambient_light_color = Color(0.08, 0.08, 0.12)
-			env.ambient_light_energy = 0.5
+			env.ambient_light_energy = 0.45
 
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
@@ -324,7 +324,7 @@ func _create_space_environment():
 		3:  # Dark Matter - eerie green from mothership at (30, 18, -350)
 			sun.basis = Basis.looking_at((light_target - Vector3(30, 18, -350)).normalized())
 			sun.light_color = Color(0.4, 0.8, 0.5)
-			sun.light_energy = 1.2
+			sun.light_energy = 1.0
 		_:  # Cosmic Highway - cool starlight from upper-left
 			sun.basis = Basis.looking_at((light_target - Vector3(-30, 40, -200)).normalized())
 			sun.light_color = Color(0.8, 0.85, 1.0)
@@ -343,16 +343,16 @@ func _create_space_environment():
 	match GameState.selected_group:
 		1:  # Nebula - cool violet against the orange ring light
 			fill.light_color = Color(0.75, 0.6, 0.9)
-			fill.light_energy = 0.5
+			fill.light_energy = 0.36
 		2:  # Solar - warm neutral, keeps the harsh sun look
 			fill.light_color = Color(1.0, 0.85, 0.7)
-			fill.light_energy = 0.45
-		3:  # Dark Matter - pale green, the dimmest theme needs the most
+			fill.light_energy = 0.38
+		3:  # Dark Matter - pale green, kept dimmest so the theme stays murky
 			fill.light_color = Color(0.55, 0.85, 0.7)
-			fill.light_energy = 0.6
+			fill.light_energy = 0.28
 		_:  # Cosmic Highway
 			fill.light_color = Color(0.8, 0.85, 1.0)
-			fill.light_energy = 0.45
+			fill.light_energy = 0.38
 	add_child(fill)
 
 	match GameState.selected_group:
@@ -1460,10 +1460,12 @@ func _init_track_materials():
 		Color(0.4, 0.65, 1.0),
 		Color(0.7, 0.4, 0.9),
 		Color(1.0, 0.6, 0.25),
-		Color(0.4, 0.9, 0.6),
+		Color(0.3, 0.68, 0.45),
 	]
 	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
 
+	# Dark Matter stays murky: weakest self-glow of all themes
+	var glow := 0.28 if GameState.selected_group == 3 else 0.4
 	for h in range(1, 10):
 		var mat := StandardMaterial3D.new()
 		var brightness := 1.2 + (h - 1) * 0.1
@@ -1471,7 +1473,7 @@ func _init_track_materials():
 		mat.albedo_color.a = 1.0
 		mat.emission_enabled = true
 		mat.emission = base_color * 0.3
-		mat.emission_energy_multiplier = 0.5
+		mat.emission_energy_multiplier = glow
 		_height_materials[h] = mat
 
 	_tunnel_wall_mat = StandardMaterial3D.new()
