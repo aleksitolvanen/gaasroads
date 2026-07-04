@@ -39,6 +39,7 @@ endless chunking/cleanup/death-reset.
     godot --headless --path . -s tests/smoke_music.gd
     godot --headless --path . -s tests/smoke_dark.gd
     godot --headless --path . -s tests/smoke_endless.gd
+    godot --headless --path . -s tests/smoke_menu.gd
 
 Each prints `... SMOKE OK` on success.
 
@@ -64,14 +65,37 @@ Flags:
 | `--exploits` | allow the banked air-jump (physics as shipped; default models intended physics) |
 | `--tape F` | write the winning input tape (`W/S` + `A/D` + `J` per line) |
 
-Expected: all 20 authored levels report `COMPLETABLE` within seconds.
+Expected: all 15 authored levels report `COMPLETABLE` within seconds.
 
 **Caveats**: routes that need deep movement tech (bounce chains, coyote-delay
 jumps) can hide behind millions of states — before trusting a "no" on a
 suspicious level, retry with `--stall 5000000 --budget 600`. State bucketing
 can in principle cause a false "no", never a false "yes".
 
-### 5. Adversarial probes — `tests/make_adversarial.py`
+### 5. Track texture analyzer — `analyze_levels.py`
+
+Quantifies how "eventful" a track is row by row, for tuning the generator
+against the extracted SkyRoads roads (`tests/skyroads/`, local only). The
+headline metric is the *dull run*: consecutive wide, flat, unfragmented,
+unchanged rows — long dull runs are the boring stretches.
+
+    godot --headless --path . -s tests/dump_tracks.gd
+    python analyze_levels.py "tests/samples/*.txt" --summary
+    python analyze_levels.py "tests/skyroads/road_*.txt" --summary
+
+SkyRoads reference (mean): dullmax ~5.6, dull8% ~4, gap ~8%, frag ~31%,
+tun ~16%, w_avg ~3.0 *on a 7-wide grid* (≈4.2 scaled to our 10), ev/row
+~0.74. Generator output should sit in that neighbourhood: dullmax under
+~10 on every track, dull8% near zero, ev/row 0.55+.
+
+Authored sets are regenerated reproducibly with fixed seeds:
+
+    godot --headless --path . -s tests/regen_levels.gd
+
+then re-verify with the solver (step 4) — every regenerated level must be
+`COMPLETABLE`. Originals live in `raw/levels_original/`.
+
+### 6. Adversarial probes — `tests/make_adversarial.py`
 
 Corner-case levels for validating the *solver* (and for documenting what the
 movement system really allows):
