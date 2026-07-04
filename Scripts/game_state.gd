@@ -6,7 +6,7 @@ var cockpit_texture: Texture2D = preload("res://cockpit.png")
 var background_texture: Texture2D = preload("res://background.png")
 
 var selected_level := "res://Levels/level1.txt"
-var selected_group := 0
+var selected_group := 1
 var selected_track := 0
 var generated_content := ""
 var is_generated := false
@@ -19,7 +19,7 @@ var custom_idx := [2, 2, 1, 1, 0, 2, 1, 2]
 var sfx_enabled := true
 var classical_mode := false
 var autopilot := false
-var menu_group := 0
+var menu_group := 1
 var menu_track := 0
 
 const SAVE_PATH := "user://completed.cfg"

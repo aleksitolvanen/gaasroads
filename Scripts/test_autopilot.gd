@@ -10,13 +10,12 @@ func _initialize():
 
 	# Test against known-completable levels (first 2 of each group)
 	var level_files := [
-		"res://Levels/cosmic_1.txt", "res://Levels/cosmic_2.txt",
 		"res://Levels/nebula_1.txt", "res://Levels/nebula_2.txt",
 		"res://Levels/solar_1.txt", "res://Levels/solar_2.txt",
 		"res://Levels/dark_1.txt", "res://Levels/dark_2.txt",
 	]
 	var level_names := [
-		"Cosmic 1", "Cosmic 2", "Nebula 1", "Nebula 2",
+		"Nebula 1", "Nebula 2",
 		"Solar 1", "Solar 2", "Dark 1", "Dark 2",
 	]
 
