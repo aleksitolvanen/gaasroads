@@ -293,16 +293,16 @@ func _create_space_environment():
 	match GameState.selected_group:
 		2:  # Solar - very dark ambient, sun does the work
 			env.ambient_light_color = Color(0.08, 0.06, 0.04)
-			env.ambient_light_energy = 0.3
+			env.ambient_light_energy = 0.4
 		1:  # Nebula
 			env.ambient_light_color = Color(0.12, 0.08, 0.15)
-			env.ambient_light_energy = 0.4
+			env.ambient_light_energy = 0.5
 		3:  # Dark Matter
 			env.ambient_light_color = Color(0.06, 0.1, 0.08)
-			env.ambient_light_energy = 0.3
+			env.ambient_light_energy = 0.45
 		_:  # Cosmic Highway
 			env.ambient_light_color = Color(0.08, 0.08, 0.12)
-			env.ambient_light_energy = 0.4
+			env.ambient_light_energy = 0.5
 
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
@@ -329,7 +329,31 @@ func _create_space_environment():
 			sun.basis = Basis.looking_at((light_target - Vector3(-30, 40, -200)).normalized())
 			sun.light_color = Color(0.8, 0.85, 1.0)
 			sun.light_energy = 1.0
+	# every theme's sun sits ahead of the player, so cast shadows land on
+	# the approach to a step; partial opacity keeps them readable
+	sun.shadow_opacity = 0.75
 	add_child(sun)
+
+	# Shadowless fill from behind the cockpit, aimed down the track: lights
+	# the front faces of steps and walls that the sun leaves black. One
+	# extra directional light with no shadow map is near-free on WebGL.
+	var fill := DirectionalLight3D.new()
+	fill.shadow_enabled = false
+	fill.basis = Basis.looking_at(Vector3(0.12, -0.3, -1.0).normalized())
+	match GameState.selected_group:
+		1:  # Nebula - cool violet against the orange ring light
+			fill.light_color = Color(0.75, 0.6, 0.9)
+			fill.light_energy = 0.5
+		2:  # Solar - warm neutral, keeps the harsh sun look
+			fill.light_color = Color(1.0, 0.85, 0.7)
+			fill.light_energy = 0.45
+		3:  # Dark Matter - pale green, the dimmest theme needs the most
+			fill.light_color = Color(0.55, 0.85, 0.7)
+			fill.light_energy = 0.6
+		_:  # Cosmic Highway
+			fill.light_color = Color(0.8, 0.85, 1.0)
+			fill.light_energy = 0.45
+	add_child(fill)
 
 	match GameState.selected_group:
 		1:
