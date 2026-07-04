@@ -68,15 +68,19 @@ static func chunk_begin(p: Dictionary) -> Dictionary:
 		else:
 			dmult = 1.4
 		base_diff *= dmult
-	base_diff = clampf(base_diff + float(p.get("diff_boost", 0.0)), 0.22, 1.0)
+	# authored finals may pin difficulty past 1.0: the envelope then rides at
+	# max intensity for most of the track and breathers all but vanish
+	base_diff = clampf(base_diff + float(p.get("diff_boost", 0.0)), 0.22, 1.25)
 
 	# --- per-track personality ---
 	var mults := {}
 	var nonzero := 0
 	for pat in PATTERN_POOL:
 		var roll := rng.randf()
+		# the SkyRoads staples (fragmented roads, tunnels) rarely sit a track out
+		var zero_p := 0.12 if pat in [PAT_RAILS, PAT_CHECKER, PAT_TUNNEL] else 0.28
 		var m := 0.0
-		if roll < 0.28:
+		if roll < zero_p:
 			m = 0.0          # not part of this track's vocabulary
 		elif roll < 0.55:
 			m = 0.5
@@ -92,7 +96,7 @@ static func chunk_begin(p: Dictionary) -> Dictionary:
 		mults[PAT_CHICANE] = 1.0
 		mults[PAT_STAIRS] = 1.0
 	# strong explicit weights override the palette lottery
-	if p.get("tunnel_weight", 10) + p.get("tunnel_lane_weight", 8) / 2 >= 20:
+	if p.get("tunnel_weight", 10) + p.get("tunnel_lane_weight", 8) / 2 >= 12:
 		mults[PAT_TUNNEL] = maxf(mults[PAT_TUNNEL], 0.75)
 	if p.get("narrow_weight", 15) >= 25:
 		mults[PAT_CHICANE] = maxf(mults[PAT_CHICANE], 0.75)
@@ -120,16 +124,24 @@ static func chunk_begin(p: Dictionary) -> Dictionary:
 		"iface": {"pos": 2, "w": 6, "h": maxi(1, p.get("min_height", 1))},
 		"sig": 0,
 	}
+	# tunnel-weighted tracks always get at least one bore (first free
+	# pattern stage past the intro), matching SkyRoads' tunnel presence
+	state.force_tunnel = p.get("tunnel_weight", 10) + p.get("tunnel_lane_weight", 8) / 2 >= 10
 	state.sig = _pick_pattern(rng, p, 0.6, style)
 	# spice patterns don't carry a whole track as its recurring theme
 	if state.sig == PAT_LEDGE:
 		state.sig = PAT_CHICANE
 	elif state.sig == PAT_SPLIT:
 		state.sig = PAT_RHYTHM
-	# half of all tracks are themed on a road-fragmenting texture - the
-	# SkyRoads look - regardless of what the filler palette rolled
-	if rng.randf() < 0.5:
+	# most tracks are themed on a road-fragmenting texture - the
+	# SkyRoads look - regardless of what the filler palette rolled;
+	# tunnel-heavy configs may theme on the bore instead
+	if rng.randf() < 0.6:
 		state.sig = PAT_RAILS if rng.randf() < 0.6 else PAT_CHECKER
+	elif p.get("tunnel_weight", 10) + p.get("tunnel_lane_weight", 8) >= 26 and rng.randf() < 0.5:
+		state.sig = PAT_TUNNEL
+	if state.sig == PAT_TUNNEL:
+		state.force_tunnel = false
 	return state
 
 # Random intensity envelope: intro, 2-3 waves (build, peak, breather) with
@@ -190,7 +202,13 @@ static func chunk_next(state: Dictionary) -> Array[String]:
 		"cruise":
 			_stage_cruise(state, out, budget)
 		"sig":
-			_phrase(state, out, state.sig, intensity, budget)
+			# a pending guaranteed tunnel may claim a late sig stage - some
+			# envelopes have hardly any free phrase stages to fire it in
+			if state.force_tunnel and f > 0.5:
+				state.force_tunnel = false
+				_phrase(state, out, PAT_TUNNEL, intensity, budget)
+			else:
+				_phrase(state, out, state.sig, intensity, budget)
 		"finale":
 			match int(style.finale):
 				0:
@@ -204,6 +222,9 @@ static func chunk_next(state: Dictionary) -> Array[String]:
 						_build_pattern(state, out, pat3, intensity, maxi(10, budget / 3))
 		_:
 			var pat := _pick_pattern(rng, state.p, intensity, style)
+			if state.force_tunnel and f > 0.2:
+				pat = PAT_TUNNEL
+				state.force_tunnel = false
 			_phrase(state, out, pat, intensity, budget)
 	state.rows += out.size()
 	return out
@@ -216,16 +237,16 @@ static func _pick_pattern(rng: RandomNumberGenerator, p: Dictionary, it: float, 
 	var gw: int = p.get("gap_weight", 10)
 	var tlw: int = p.get("tunnel_lane_weight", 8)
 	var base: Array = [
-		12 + gw,
+		10 + gw,
 		10 + nw,
-		14 if p.get("max_height", 4) >= 3 else 0,
-		tw + tlw / 2,
-		(6 + gw / 2) if it >= 0.3 else 0,
+		12 if p.get("max_height", 4) >= 3 else 0,
+		6 + tw * 2 + tlw,  # tunnels are set pieces: scale hard with intent
+		(6 + gw / 2) if it >= 0.25 else 0,
 		(4 + nw / 2) if it >= 0.45 else 0,
-		8 if it >= 0.25 and it <= 0.8 else 0,
+		10 + nw / 2,
 		14,
-		18 + nw,
-		14 + gw,
+		20 + nw,
+		18 + gw,
 		(10 + gw / 2) if it >= 0.55 else 0,
 	]
 	var mults: Dictionary = style.mults
@@ -266,26 +287,27 @@ static func _phrase(state: Dictionary, out: Array, pat: int, intensity: float, b
 	if pat != PAT_SPEEDWAY:
 		if budget >= 28 and rng.randf() < 0.85:
 			reps = 2
-		if budget >= 52 and rng.randf() < 0.55:
-			reps = 3
+		if budget >= 52 and rng.randf() < 0.55 and pat != PAT_TUNNEL:
+			reps = 3  # tunnels stay long bores instead of chopped thirds
 	var per := budget / reps
 	for r in reps:
 		var it := clampf(intensity + rng.randf_range(0.06, 0.14) * r, 0.05, 1.0)
 		_build_pattern(state, out, pat, it, per)
 		if r < reps - 1:
-			_lane_rows(state, out, 1 + rng.randi_range(1, 3))
+			_lane_rows(state, out, 1 + rng.randi_range(0, 2))
 
 static func _stage_cruise(state: Dictionary, out: Array, budget: int):
 	var rng: RandomNumberGenerator = state.rng
 	var ifc: Dictionary = state.iface
 	var style: Dictionary = state.style
-	var w := clampi(5 + rng.randi_range(0, 4) + int(style.width_bias), 4, W)
+	var w := clampi(4 + rng.randi_range(0, 2) + int(style.width_bias), 3, 6)
 	var pos := rng.randi_range(0, W - w)
 	var h: int = int(style.base_h) if ifc.h > int(style.base_h) and rng.randf() < 0.5 else mini(ifc.h, 4)
 	_connect(state, out, pos, w, h)
-	# hard tracks breathe less
-	var cap := 6 + int((1.0 - float(state.diff)) * 12.0) + rng.randi_range(0, 4)
-	_lane_rows(state, out, clampi(budget - 2, 4, cap))
+	# breathers are short - SkyRoads keeps even its rest sections to a few
+	# rows - and usually textured with curbs; hard tracks breathe less still
+	var cap := 4 + int((1.0 - float(state.diff)) * 5.0) + rng.randi_range(0, 2)
+	_deco_rows(state, out, clampi(budget - 2, 3, maxi(4, cap)))
 
 static func _build_pattern(state: Dictionary, out: Array, pat: int, it: float, budget: int):
 	match pat:
@@ -307,11 +329,12 @@ static func _build_pattern(state: Dictionary, out: Array, pat: int, it: float, b
 static func _pat_rhythm(state: Dictionary, out: Array, it: float, budget: int):
 	var rng: RandomNumberGenerator = state.rng
 	var ifc: Dictionary = state.iface
-	var w := clampi(5 - int(it * 3.5) + rng.randi_range(0, 1) + int(state.style.width_bias), 1, 6)
+	var w := clampi(4 - int(it * 2.5) + rng.randi_range(0, 1) + int(state.style.width_bias), 1, 5)
 	var pos := clampi(ifc.pos + (ifc.w - w) / 2 + rng.randi_range(-1, 1), 0, W - w)
 	_connect(state, out, pos, w, ifc.h)
-	var solid := maxi(2, 6 - int(it * 4.0) + rng.randi_range(-1, 1))
-	var g := mini(1 + int(it * 1.6), _max_gap_rows(solid + 2, state.lim))
+	var solid := maxi(2, 5 - int(it * 3.0) + rng.randi_range(-1, 1))
+	# mid-pattern gaps only ever have `solid` rows of run-up behind them
+	var g := mini(1 + int(it * 2.2), _max_gap_rows(solid, state.lim))
 	var reps := clampi(budget / (solid + g), 2, 6)
 	for i in reps:
 		_lane_rows(state, out, solid)
@@ -354,7 +377,7 @@ static func _pat_stairs(state: Dictionary, out: Array, it: float, budget: int):
 	var ifc: Dictionary = state.iface
 	var lim: Dictionary = state.lim
 	var max_h: int = mini(state.p.get("max_height", 4), 8)
-	var w := clampi(6 - int(it * 3.0) + rng.randi_range(0, 1), 3, 6)
+	var w := clampi(5 - int(it * 2.5) + rng.randi_range(0, 1), 3, 5)
 	var pos := clampi(ifc.pos + (ifc.w - w) / 2 + rng.randi_range(-1, 1), 0, W - w)
 	var base: int = ifc.h
 	_connect(state, out, pos, w, base)
@@ -363,13 +386,14 @@ static func _pat_stairs(state: Dictionary, out: Array, it: float, budget: int):
 	if climbs < 1:
 		_lane_rows(state, out, mini(budget, 8))
 		return
+	# _connect replaced state.iface above - mutate the live dict, not ifc
 	var plateau := rng.randi_range(2, 4)
 	for i in climbs:
-		ifc.h += step
+		state.iface.h += step
 		_lane_rows(state, out, plateau)
-	_lane_rows(state, out, rng.randi_range(3, 6))
+	_lane_rows(state, out, rng.randi_range(2, 4))
 	if rng.randf() < 0.45:
-		ifc.h = base
+		state.iface.h = base
 		_lane_rows(state, out, 3)
 
 # Lead-in, tunnel bore, lead-out.
@@ -389,8 +413,8 @@ static func _pat_tunnel(state: Dictionary, out: Array, it: float, budget: int):
 	var wall_a := clampi(pos - rng.randi_range(2, 3), 0, pos)
 	var wall_b := clampi(pos + w + rng.randi_range(2, 3), pos + w, W)
 	_connect(state, out, clampi(pos - 1, 0, W - w - 2), w + 2, h)
-	_lane_rows(state, out, 3)
-	var tlen := clampi(int(5.0 + it * 14.0 + rng.randi_range(0, 6)), 5, maxi(5, budget - 10))
+	_lane_rows(state, out, 2)
+	var tlen := clampi(int(8.0 + it * 18.0 + rng.randi_range(0, 8)), 6, maxi(6, budget - 8))
 	for _i in tlen:
 		var r := _cells()
 		if walled:
@@ -398,7 +422,7 @@ static func _pat_tunnel(state: Dictionary, out: Array, it: float, budget: int):
 		_fill(r, pos, pos + w, h, "T")
 		out.append(_row_str(r))
 	state.iface = {"pos": clampi(pos - 1, 0, W - w - 2), "w": w + 2, "h": h}
-	_lane_rows(state, out, 3)
+	_lane_rows(state, out, 2)
 
 # Short pads separated by gaps: either alternating around a line or
 # drifting steadily across the road.
@@ -408,7 +432,7 @@ static func _pat_islands(state: Dictionary, out: Array, it: float, budget: int):
 	var lim: Dictionary = state.lim
 	var w := clampi(3 - (1 if it > 0.6 else 0) + (1 if rng.randf() < 0.25 else 0), 2, 4)
 	var pad := clampi(4 - int(it * 2.0) + rng.randi_range(0, 1), 2, 5)
-	var g := mini(1 + (1 if it > 0.7 else 0), _max_gap_rows(pad, lim))
+	var g := mini(1 + int(it * 1.5), _max_gap_rows(pad, lim))
 	var off := 1 + int(it)
 	var drift: bool = rng.randf() < 0.4
 	var base := clampi(ifc.pos + (ifc.w - w) / 2, off, W - w - off)
@@ -418,6 +442,10 @@ static func _pat_islands(state: Dictionary, out: Array, it: float, budget: int):
 	var reps := clampi(budget / (pad + g), 3, 7)
 	var side := 1
 	var dirn := 1 if base < (W - w) / 2 else -1
+	# twin pads: a second island rides at fixed separation - two lanes,
+	# pick either, road reads as fragmented
+	var twin: bool = not drift and w <= 3 and rng.randf() < 0.35
+	var twin_sep: int = w + rng.randi_range(1, 2)
 	for i in reps:
 		var pos: int
 		if drift:
@@ -427,6 +455,10 @@ static func _pat_islands(state: Dictionary, out: Array, it: float, budget: int):
 		for _j in (pad if i < reps - 1 else 3):
 			var r := _cells()
 			_fill(r, pos, pos + w, ifc.h)
+			if twin:
+				var tp := pos + twin_sep if pos + twin_sep + w <= W else pos - twin_sep
+				if tp >= 0:
+					_fill(r, tp, tp + w, ifc.h)
 			out.append(_row_str(r))
 		state.iface = {"pos": pos, "w": w, "h": ifc.h}
 		ifc = state.iface
@@ -480,7 +512,7 @@ static func _pat_speedway(state: Dictionary, out: Array, it: float, budget: int)
 	var rng: RandomNumberGenerator = state.rng
 	var ifc: Dictionary = state.iface
 	var lim: Dictionary = state.lim
-	var w := rng.randi_range(7, 9)
+	var w := rng.randi_range(6, 8)
 	var pos := rng.randi_range(0, W - w)
 	_connect(state, out, pos, w, ifc.h)
 	var req := clampf(lerpf(0.55, 1.0, it) + rng.randf_range(-0.05, 0.05), 0.5, 1.0)
@@ -498,7 +530,9 @@ static func _pat_speedway(state: Dictionary, out: Array, it: float, budget: int)
 	var narrow_landing: bool = it > 0.8 and rng.randf() < 0.55
 	var land_w := 1 if it > 0.9 and rng.randf() < 0.5 else 2
 	var hh: int = state.iface.h
-	_lane_rows(state, out, runup)
+	# curbed run-up: full throttle needs no steering, but the straight
+	# reads as a set piece instead of a blank slab
+	_deco_rows(state, out, runup, false)
 	for i in gaps:
 		for _j in g:
 			out.append(_row_str(_cells()))
@@ -511,8 +545,8 @@ static func _pat_speedway(state: Dictionary, out: Array, it: float, budget: int)
 			state.iface = {"pos": lp, "w": land_w, "h": hh}
 			_connect(state, out, pos, w, hh)
 		if i < gaps - 1:
-			_lane_rows(state, out, runup)
-	_lane_rows(state, out, 6)
+			_deco_rows(state, out, runup, false)
+	_lane_rows(state, out, 4)
 
 # SkyRoads-style gates: a solid lane punctuated by block rows on a rhythm.
 # Slot gates wander across the lane; at high intensity some gates are full
@@ -520,10 +554,10 @@ static func _pat_speedway(state: Dictionary, out: Array, it: float, budget: int)
 static func _pat_gates(state: Dictionary, out: Array, it: float, budget: int):
 	var rng: RandomNumberGenerator = state.rng
 	var ifc: Dictionary = state.iface
-	var w := clampi(7 - int(it * 3.0) + rng.randi_range(0, 1) + int(state.style.width_bias), 3, 8)
+	var w := clampi(6 - int(it * 2.5) + rng.randi_range(0, 1) + int(state.style.width_bias), 3, 7)
 	var pos := clampi(ifc.pos + (ifc.w - w) / 2 + rng.randi_range(-1, 1), 0, W - w)
 	_connect(state, out, pos, w, ifc.h)
-	var interval := clampi(5 - int(it * 3.0) + rng.randi_range(-1, 1), 2, 7)
+	var interval := clampi(5 - int(it * 3.0) + rng.randi_range(-1, 1), 2, 5)
 	var block_h: int = mini(ifc.h + 2, 9)
 	var slot_w := clampi(3 - int(it * 2.0), 1, 3)
 	var wall_chance := rng.randf_range(0.1, 0.5) if it > 0.5 else 0.0
@@ -610,13 +644,20 @@ static func _pat_checker(state: Dictionary, out: Array, it: float, budget: int):
 	var bite := clampi(1 + int(it * 2.0) + rng.randi_range(0, 1), 1, w - 2)
 	var deep := 1 + (1 if it > 0.65 and rng.randf() < 0.5 else 0)
 	var reps := clampi(budget / (clean + deep), 3, 9)
+	# hole checkers bite the middle of the road instead of the edges,
+	# splitting it in two - the classic SkyRoads fragmented look
+	var holes: bool = w >= 4 and rng.randf() < 0.6
 	var side := rng.randi() % 2
 	for i in reps:
 		_lane_rows(state, out, clean)
 		for _d in deep:
 			var r := _cells()
 			_fill(r, pos, pos + w, ifc.h)
-			if side == 0:
+			if holes:
+				var hb := mini(bite, w - 3)
+				var hp := pos + (1 + rng.randi() % maxi(1, w - hb - 1) if side == 0 else (w - hb) / 2)
+				_erase(r, hp, hp + hb)
+			elif side == 0:
 				_erase(r, pos, pos + bite)
 			else:
 				_erase(r, pos + w - bite, pos + w)
@@ -653,7 +694,7 @@ static func _connect(state: Dictionary, out: Array, tpos: int, tw_: int, th: int
 		var lim: Dictionary = state.lim
 		while ifc.h < th:
 			ifc.h = mini(ifc.h + int(lim.max_step), th)
-			_lane_rows(state, out, 3)
+			_lane_rows(state, out, 2)
 		if ifc.h > th:
 			ifc.h = th
 			_lane_rows(state, out, 2)
@@ -679,6 +720,45 @@ static func _lane_rows(state: Dictionary, out: Array, n: int):
 		var r := _cells()
 		_fill(r, ifc.pos, ifc.pos + ifc.w, ifc.h)
 		out.append(_row_str(r))
+
+# SkyRoads-style lane texture: wide lanes get raised curb walls on the
+# shoulders (alternating profile every few rows) or an intermittent center
+# ridge. The flat channel is never blocked, so passability is untouched -
+# curbs just punish sloppy drifting and keep wide rows visually alive.
+static func _deco_rows(state: Dictionary, out: Array, n: int, allow_ridge := true):
+	var rng: RandomNumberGenerator = state.rng
+	var ifc: Dictionary = state.iface
+	if ifc.w < 5 or n < 4 or (n < 7 and rng.randf() < 0.3):
+		_lane_rows(state, out, n)
+		return
+	# 0 curbs, 1 center ridge, 2 potholes punched through the road
+	var deco := 0
+	if allow_ridge and rng.randf() < 0.55:
+		deco = 1 if ifc.w >= 6 and rng.randf() < 0.5 else 2
+	var curb_h: int = mini(ifc.h + (2 if rng.randf() < 0.6 else 1), 9)
+	var hole: int = ifc.pos + 1 + rng.randi() % maxi(1, ifc.w - 2)
+	var phase_len := 2 + rng.randi() % 3
+	for i in n - 1:
+		var r := _cells()
+		_fill(r, ifc.pos, ifc.pos + ifc.w, ifc.h)
+		if i % phase_len == 0 and deco == 2:
+			hole = ifc.pos + 1 + rng.randi() % maxi(1, ifc.w - 2)
+		if (i / phase_len) % 2 == 0:
+			match deco:
+				1:
+					var mid: int = ifc.pos + ifc.w / 2
+					_fill(r, mid, mid + 1, curb_h)
+				2:
+					_erase(r, hole, hole + 1)
+				_:
+					_fill(r, ifc.pos, ifc.pos + 1, curb_h)
+					_fill(r, ifc.pos + ifc.w - 1, ifc.pos + ifc.w, curb_h)
+		elif deco == 0 and ifc.w >= 6:
+			_fill(r, ifc.pos, ifc.pos + 2, mini(ifc.h + 1, curb_h))
+			_fill(r, ifc.pos + ifc.w - 2, ifc.pos + ifc.w, mini(ifc.h + 1, curb_h))
+		out.append(_row_str(r))
+	# end plain so the next transition reads cleanly
+	_lane_rows(state, out, 1)
 
 static func _max_gap_rows(runup_rows: int, lim: Dictionary) -> int:
 	# Top speed reachable over the run-up from a standstill (accel 12,
