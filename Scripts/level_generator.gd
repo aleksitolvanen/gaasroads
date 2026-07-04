@@ -590,6 +590,10 @@ static func _pat_rails(state: Dictionary, out: Array, it: float, budget: int):
 	var rw := 1 if it > 0.45 or rng.randf() < 0.5 else 2
 	var nrails := clampi(4 - int(it * 2.0), 2, 4)
 	var spacing := rw + rng.randi_range(1, 2)
+	# a dropout hop is a committed classical jump (steering locks at
+	# takeoff, max 60% of 15 u/s): cap rail separation to that drift
+	var max_sp := maxi(rw + 1, int(0.6 * 15.0 * float(state.lim.air_time) * 0.85 / 2.0))
+	spacing = mini(spacing, max_sp)
 	var span := mini((nrails - 1) * spacing + rw, W)
 	var base := rng.randi_range(0, W - span)
 	var rails: Array = []

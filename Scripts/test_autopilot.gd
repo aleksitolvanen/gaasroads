@@ -89,6 +89,10 @@ func _simulate(content: String, level_idx: int) -> Dictionary:
 	var on_floor := false
 	var last_floor_y := 0.5
 	var can_jump := true
+	# classical mode (the game default): steering scales with throttle and
+	# locks for the duration of a jump
+	var jump_airborne := false
+	var locked_lateral := 0.0
 	var level_end_z := -(rows - 1) * TILE_SIZE
 	var max_ticks := int(180.0 / dt)
 
@@ -115,14 +119,17 @@ func _simulate(content: String, level_idx: int) -> Dictionary:
 			speed -= accel * dt
 		speed = clampf(speed, 0, max_speed)
 
-		# Lateral
-		pos.x += ap.dir * lat_speed * dt
+		# Lateral — classical: throttle-scaled, locked while jump-airborne
+		var eff_lateral: float = ap.dir * lat_speed * (0.25 + 0.35 * speed / max_speed)
+		pos.x += (locked_lateral if jump_airborne else eff_lateral) * dt
 
 		# Jump
 		if ap.jump and (on_floor or can_jump):
 			vy = jump_vel
 			can_jump = false
 			on_floor = false
+			jump_airborne = true
+			locked_lateral = eff_lateral
 
 		# Gravity
 		if not on_floor:
@@ -163,6 +170,7 @@ func _simulate(content: String, level_idx: int) -> Dictionary:
 						can_jump = true
 					pos.y = floor_top + ship_half_h
 					on_floor = true
+					jump_airborne = false
 					last_floor_y = floor_top
 				else:
 					on_floor = false
@@ -348,6 +356,7 @@ func _autopilot(grid: Array, tunnels: Array, cols: int, pos: Vector3, speed: flo
 				break
 
 	# Speed — go fast, only brake for narrow paths and big lateral moves
+	# (classical steering is throttle-scaled and weak, so brake earlier)
 	var target_speed := max_speed
 	var narrow_count := 0
 	for dr in [3, 5, 8]:
@@ -365,8 +374,19 @@ func _autopilot(grid: Array, tunnels: Array, cols: int, pos: Vector3, speed: flo
 		target_speed = 16.0
 	elif narrow_count >= 2:
 		target_speed = 22.0
-	if absf(diff) > TILE_SIZE * 3:
-		target_speed = minf(target_speed, 18.0)
+	if absf(diff) > TILE_SIZE * 1.5:
+		target_speed = minf(target_speed, 16.0)
+
+	# Classical: steering locks at takeoff, so a jump commits to its drift.
+	# Aim the locked lateral to land on the target column instead of
+	# carrying whatever steer happened to be held.
+	if need_jump:
+		var air := 0.8
+		var lv_scale := 0.25 + 0.35 * speed / max_speed
+		if absf(diff) < 0.3:
+			steer = 0.0
+		else:
+			steer = clampf(diff / air / (15.0 * lv_scale), -1.0, 1.0)
 
 	# Tunnel overrides
 	if in_tunnel and tunnel_col_now >= 0:

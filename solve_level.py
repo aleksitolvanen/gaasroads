@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """Reachability solver: proves whether a level can be completed.
 
-Ports the ship physics (Scripts/ship.gd, normal mode) and searches the full
-input space with a best-first sweep along the track, deduplicating states
-into buckets. A COMPLETABLE verdict comes with a working input tape; NOT
-COMPLETABLE means the entire (bucketed) state space drains before the goal,
-and the report shows the row where every path dies. Margins are conservative,
-so frame-perfect tricks may be rejected - by design.
+Ports the ship physics (Scripts/ship.gd) and searches the full input space
+with a best-first sweep along the track, deduplicating states into buckets.
+A COMPLETABLE verdict comes with a working input tape; NOT COMPLETABLE means
+the entire (bucketed) state space drains before the goal, and the report
+shows the row where every path dies. Margins are conservative, so
+frame-perfect tricks may be rejected - by design.
+
+Simulates CLASSICAL mode by default (the game's default): lateral speed
+scales with throttle (25%-60% of 15 u/s), steering locks at takeoff for the
+whole jump, and the coyote window is y < floor+0.4 with vy < 0. Pass
+--normal for the free-steering dev mode.
 
 Usage:
   python solve_level.py                    # all Levels/*.txt
   python solve_level.py Levels/nebula_1.txt --budget 120
-  python solve_level.py file.txt --theme 2 --tape tape.txt
+  python solve_level.py file.txt --theme 2 --tape tape.txt --normal
 """
 import argparse
 import heapq
@@ -62,10 +67,15 @@ def load_level(path):
     return tops, tun
 
 
-def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=True, stall_limit=400_000):
+def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=True, stall_limit=400_000, classical=True):
     rows = len(tops)
     goal_u = (rows - 1) * 2.0
     ncols = 10
+
+    def in_coyote(y, vy, lfy):
+        if classical:
+            return y < lfy + 0.4 and -2.5 < vy < 0.0
+        return y < lfy + 0.55 and vy > -2.5
 
     def cols_at(x):
         c0 = int(math.floor((x - HALF_W + 1.0) / 2.0))
@@ -78,7 +88,7 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
         return max(0, r0), min(rows - 1, r1)
 
     def bucket(s):
-        u, x, y, vy, spd, cj, lfy = s
+        u, x, y, vy, spd, cj, lfy, ja, lv = s
         ub = int(u * 2)
         xb = int(x * 2)
         sb = int(spd)
@@ -91,12 +101,22 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
         )
         if grounded:
             return (1, ub, xb, sb)
-        return (0, ub, xb, int((y + 11.0) * 2.5), int((vy + 31.0) / 1.5), sb, cj, int(lfy * 2))
+        latb = int((lv + 16.0) * 2) if ja else -1
+        return (0, ub, xb, int((y + 11.0) * 2.5), int((vy + 31.0) / 1.5), sb, cj, int(lfy * 2), latb)
 
     def tick(s, thr, lat, jmp):
         # returns (state, dead, done)
-        u, x, y, vy, spd, cj, lfy = s
+        u, x, y, vy, spd, cj, lfy, ja, lv = s
         spd = min(MAX_SPEED, max(0.0, spd + thr * ACCEL * DT))
+        # lateral velocity resolves before floor/jump logic, like the game:
+        # classical scales steering with throttle and rides the locked value
+        # while jump-airborne
+        if classical:
+            eff = lat * LAT_SPEED * (0.25 + 0.35 * spd / MAX_SPEED)
+            latv = lv if ja else eff
+        else:
+            eff = lat * LAT_SPEED
+            latv = eff
         bottom = y - HALF_H
 
         # support under current position
@@ -114,23 +134,29 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
             lfy = y
             vy = 0.0
             cj = True
+            ja = False
         else:
             vy -= grav * DT
             # The game banks can_jump forever after leaving the floor (one
             # free air-jump - an exploit). Strict mode expires it with the
             # coyote window so verdicts reflect intended physics.
-            if strict and cj and not (y < lfy + 0.55 and vy > -2.5):
+            if strict and cj and not in_coyote(y, vy, lfy):
                 cj = False
 
         in_tunnel = any(tun[r][c] for r in range(r0, r1 + 1) for c in range(c0, c1 + 1))
         # vy guard: the real jump is edge-triggered, so it can't re-fire while
         # still ascending from the previous press
-        if jmp and not in_tunnel and vy <= 0.5 and (cj or onf or (y < lfy + 0.55 and vy > -2.5)):
+        if jmp and not in_tunnel and vy <= 0.5 and (cj or onf or in_coyote(y, vy, lfy)):
             vy = jump_v
             cj = False
             onf = False
+            if classical:
+                # ground takeoffs already moved with eff this frame; a
+                # coyote re-jump keeps riding the old lock until next tick
+                ja = True
+                lv = eff
 
-        nx = x + lat * LAT_SPEED * DT
+        nx = x + latv * DT
         ny = y + vy * DT
         nu = u + spd * DT
         nbottom = ny - HALF_H
@@ -199,17 +225,20 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
                     vy = 0.0
                 cj = True
                 lfy = ny
+                # contact unlocks steering (the game clears _jump_airborne on
+                # its is_on_floor frame, including the bounce branch)
+                ja = False
 
         # Below every possible floor top (min 0.5) minus snap: can never land
         if vy < 0.0 and ny - HALF_H < 0.5 - SNAP:
             return None, True, False
         if nu >= goal_u:
-            return (nu, nx, ny, vy, spd, cj, lfy), False, True
-        return (nu, nx, ny, vy, spd, cj, lfy), False, False
+            return (nu, nx, ny, vy, spd, cj, lfy, ja, lv), False, True
+        return (nu, nx, ny, vy, spd, cj, lfy, ja, lv), False, False
 
     from collections import deque
 
-    start = (0.0, 9.0, 1.0, 0.0, 12.0, True, 1.0)
+    start = (0.0, 9.0, 1.0, 0.0, 12.0, True, 1.0, False, 0.0)
     sb = bucket(start)
     visited = {sb}
     expanded = set()
@@ -240,7 +269,7 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
         expanded.add(key)
         states += 1
         # jump input is a no-op unless it can actually fire
-        can_fire = s[3] <= 0.5 and (s[5] or (s[2] < s[6] + 0.55 and s[3] > -2.5))
+        can_fire = s[3] <= 0.5 and (s[5] or in_coyote(s[2], s[3], s[6]))
         for idx, (thr, lat, jmp) in enumerate(INPUTS):
             if jmp and not can_fire:
                 continue
@@ -285,6 +314,8 @@ def main():
     ap.add_argument("--tape", default=None)
     ap.add_argument("--exploits", action="store_true",
                     help="allow banked air-jumps (physics as shipped)")
+    ap.add_argument("--normal", action="store_true",
+                    help="simulate normal mode (free air steering) instead of classical")
     ap.add_argument("--stall", type=int, default=400_000)
     args = ap.parse_args()
 
@@ -298,7 +329,8 @@ def main():
         t0 = time.monotonic()
         verdict, u, states, tape = solve(
             tops, tun, GROUP_GRAVITY[theme], GROUP_JUMP[theme], args.budget,
-            args.k, strict=not args.exploits, stall_limit=args.stall
+            args.k, strict=not args.exploits, stall_limit=args.stall,
+            classical=not args.normal
         )
         dt = time.monotonic() - t0
         row = u / 2.0 - 24  # file-relative row reached
@@ -318,7 +350,8 @@ def main():
         else:
             any_fail = True
             extra = f"furthest row {row:.0f}"
-        print(f"{Path(f).name:<15} theme={theme} {verdict:<16} {dt:6.1f}s {states:>8} states  {extra}")
+        mode = "normal" if args.normal else "classical"
+        print(f"{Path(f).name:<15} theme={theme} {mode:<9} {verdict:<16} {dt:6.1f}s {states:>8} states  {extra}")
     sys.exit(1 if any_fail else 0)
 
 

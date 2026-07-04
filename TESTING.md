@@ -50,6 +50,12 @@ against a Python port of the ship physics. `COMPLETABLE` always comes with a
 working input tape and is trustworthy; `LIKELY NOT COMPLETABLE` /
 `UNDECIDED` are budget-relative (see caveats).
 
+Simulates **classical mode by default** (the game's default): steering
+scales with throttle (25-60% of 15 u/s), locks at takeoff for the whole
+jump, and the coyote window is `y < floor+0.4, -2.5 < vy < 0`. Use
+`--normal` for the free-steering dev mode. Classical abilities are a
+strict subset of normal, so classical-`COMPLETABLE` implies normal too.
+
     python solve_level.py                          # all Levels/*.txt
     python solve_level.py Levels/nebula_1.txt --budget 120
     python solve_level.py track.txt --theme 2 --tape tape.txt
@@ -63,6 +69,7 @@ Flags:
 | `--k N` | ticks each input is held; 3 = 20 Hz decisions (lower = superhuman precision) |
 | `--stall N` | expansions without frontier progress before giving up (default 400k) |
 | `--exploits` | allow the banked air-jump (physics as shipped; default models intended physics) |
+| `--normal` | simulate normal mode (free air steering) instead of classical |
 | `--tape F` | write the winning input tape (`W/S` + `A/D` + `J` per line) |
 
 Expected: all 15 authored levels report `COMPLETABLE` within seconds.
@@ -103,20 +110,25 @@ movement system really allows):
     python tests/make_adversarial.py
     python solve_level.py tests/adversarial/wall_h4.txt --theme 0 --budget 120
 
-Expected verdicts under current mechanics (theme 0 unless noted):
+Expected verdicts under current mechanics (theme 0, `--budget 120`).
+Classical (default) kills every trick that needed mid-air steering or the
+loose normal-mode coyote window; the normal column preserves the old
+movement-tech snapshot (run with `--normal`):
 
-| Level | Verdict | Why |
-|---|---|---|
-| wall_h4 | COMPLETABLE | 1.5u step, apex crossing at low speed |
-| wall_h5 | COMPLETABLE | 2.0u step — bounce + coyote-window jump |
-| gap_20 | LIKELY NOT | 40u gap, beyond all known tech (~29u) |
-| pogo | COMPLETABLE | 1-row pad between gaps, bounce-touch chaining |
-| lateral_ok / lateral_far | COMPLETABLE both | far variant needs lip-bounce double-arc drift |
-| zigzag | COMPLETABLE | corner-to-corner tiles are drivable slowly |
-| tunnel_ok | COMPLETABLE | positive control: forced flat tunnel |
-| tunnel_climb | LIKELY NOT | height step inside a tunnel; no jumping under the roof |
-| speed_tight / speed_ok | COMPLETABLE both | tight variant works via bounce-touch (no deceleration on pads) |
-| bounce_gate | COMPLETABLE | needs `--stall 5000000 --budget 600`; coyote-delayed ledge jump |
+| Level | Classical | Normal | Why |
+|---|---|---|---|
+| wall_h4 | COMPLETABLE | COMPLETABLE | 1.5u step, apex crossing at low speed |
+| wall_h5 | LIKELY NOT | COMPLETABLE | 2.0u step needs bounce + steered coyote jump |
+| gap_20 | LIKELY NOT | LIKELY NOT | 40u gap, beyond all tech in either mode |
+| pogo | COMPLETABLE | COMPLETABLE | 1-row pad between gaps, straight bounce chain |
+| lateral_ok | COMPLETABLE | COMPLETABLE | committed drift covers it |
+| lateral_far | LIKELY NOT | COMPLETABLE | needed lip-bounce double-arc air steering |
+| zigzag | COMPLETABLE | COMPLETABLE | corner-to-corner tiles are drivable slowly |
+| tunnel_ok | COMPLETABLE | COMPLETABLE | positive control: forced flat tunnel |
+| tunnel_climb | LIKELY NOT | LIKELY NOT | height step inside a tunnel; no jumping under the roof |
+| speed_tight | LIKELY NOT | COMPLETABLE | normal-only bounce-touch chaining |
+| speed_ok | COMPLETABLE | COMPLETABLE | run-up sized for the jump |
+| bounce_gate | LIKELY NOT | COMPLETABLE | normal needs `--stall 5000000 --budget 600`; coyote-delay tech |
 
 If a verdict here changes after a mechanics tweak, that is the point — the
 table is a movement-tech regression snapshot, not a pass/fail suite.
@@ -129,6 +141,7 @@ sync the rest, rerun everything:
 | What changed | Update |
 |---|---|
 | Ship movement (`Scripts/ship.gd`: accel, max/lateral speed, bounce, coyote rule, jump handling) | `solve_level.py` header constants + `tick()` logic; gap/step formulas in `LevelGenerator.chunk_begin()` and `tests/gen_constraints.gd` |
+| Classical-mode rules (`ship.gd`: throttle-scaled steering, takeoff lock, classical coyote window) | `in_coyote()` + the classical branches in `solve_level.py::tick()`; the sim in `Scripts/test_autopilot.gd`; the rail-hop spacing cap in `LevelGenerator._pat_rails()` |
 | Per-group gravity/jump | `LevelGenerator.GROUP_GRAVITY` / `GROUP_JUMP_VELOCITY` (single source for game + generator), and the same two arrays in `solve_level.py` |
 | Ship collision box (`Scenes/Ship.tscn`) | `HALF_W/HALF_L/HALF_H` in `solve_level.py` |
 | Tile size / tunnel arch geometry (`Scripts/game.gd`) | `TUNNEL_OPEN` / `TUNNEL_CEIL` and tile math in `solve_level.py`; `TILE_SIZE`-derived constants in `Scripts/test_autopilot.gd` |
