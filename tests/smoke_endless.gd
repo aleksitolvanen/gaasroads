@@ -23,9 +23,12 @@ func _process(_delta) -> bool:
 	if _phase == 0:
 		_phase = 1
 		_deadline = Time.get_ticks_msec() + 15000
+		# game.gd draws chunk/reset seeds from the global RNG - pin it so a
+		# flaky run is reproducible
+		seed(909090)
+		print("global rng seeded: 909090")
 		var gs = root.get_node("GameState")
 		gs.selected_group = 0
-		gs.is_generated = true
 		gs.is_endless = true
 		gs.endless_params = {"length": 300, "min_height": 1, "max_height": 1, "tunnel_weight": 30, "narrow_weight": 0, "gap_weight": 0, "tunnel_lane_weight": 20, "sharpness": 0.1, "theme": 0, "seed": 4242}
 		# find a seed whose track has tunnels, so arch jobs get exercised
@@ -57,6 +60,10 @@ func _process(_delta) -> bool:
 		2:
 			if game._grid.size() > _grid_after_ready and game._ship.global_position.z < -90.0:
 				print("chunk appended: grid=%d, ship z=%.0f, tracked=%d, nodes=%d" % [game._grid.size(), game._ship.global_position.z, game._spawned_track.size(), game.get_node("Level").get_child_count()])
+				# Cleanup runs every 30 physics ticks; by z<-90 nothing fully
+				# passed should still be tracked (60u covers the tick lag)
+				for entry in game._spawned_track:
+					assert(entry[1] <= game._ship.global_position.z + 60.0, "passed track not freed behind the ship")
 				game._ship.start_explosion()
 				_deadline = Time.get_ticks_msec() + 10000
 				_phase = 3
@@ -67,11 +74,10 @@ func _process(_delta) -> bool:
 		4:
 			if not game._level_ready:
 				return false
-			if true:
-				print("fresh track: grid=%d, ship z=%.1f, end_z=%.0f, tracked=%d, nodes=%d, chunk_empty=%s" % [game._grid.size(), game._ship.global_position.z, game._level_end_z, game._spawned_track.size(), game.get_node("Level").get_child_count(), str(game._chunk_state.is_empty())])
-				assert(game._grid.size() < _grid_after_ready + 100, "grid should be fresh after endless reset")
-				assert(absf(game._ship.global_position.z) < 30.0, "ship not back at start")
-				assert(not game._ship.frozen, "ship still frozen")
-				print("ENDLESS SMOKE OK")
-				return true
+			print("fresh track: grid=%d, ship z=%.1f, end_z=%.0f, tracked=%d, nodes=%d, chunk_empty=%s" % [game._grid.size(), game._ship.global_position.z, game._level_end_z, game._spawned_track.size(), game.get_node("Level").get_child_count(), str(game._chunk_state.is_empty())])
+			assert(game._grid.size() < _grid_after_ready + 100, "grid should be fresh after endless reset")
+			assert(absf(game._ship.global_position.z) < 30.0, "ship not back at start")
+			assert(not game._ship.frozen, "ship still frozen")
+			print("ENDLESS SMOKE OK")
+			return true
 	return false

@@ -5,35 +5,35 @@ const GROUPS := [
 		"name": "NEBULA RUN",
 		"sub": "ethereal skies through the accretion rings",
 		"color": Color(0.7, 0.4, 0.9),
-		"prefix": "nebula", "theme": 1, "save_id": 1,
+		"prefix": "nebula", "theme": 1, "save_id": 1, "kind": "tracks",
 		"tracks": ["Haze", "Storm", "Pulse", "Wisp", "Flare"],
 	},
 	{
 		"name": "SOLAR BURN",
 		"sub": "grazing the corona - low gravity, high jumps",
 		"color": Color(1.0, 0.6, 0.25),
-		"prefix": "solar", "theme": 2, "save_id": 2,
+		"prefix": "solar", "theme": 2, "save_id": 2, "kind": "tracks",
 		"tracks": ["Ember", "Blaze", "Corona", "Scorch", "Nova"],
 	},
 	{
 		"name": "DARK MATTER",
 		"sub": "through the hostile fleet - floaty jumps",
 		"color": Color(0.4, 0.9, 0.6),
-		"prefix": "dark", "theme": 3, "save_id": 3,
+		"prefix": "dark", "theme": 3, "save_id": 3, "kind": "tracks",
 		"tracks": ["Rift", "Shadow", "Warp", "Abyss", "Omega"],
 	},
 	{
 		"name": "PROCEDURAL",
 		"sub": "generated tracks and endless mode",
 		"color": Color(0.85, 0.75, 0.35),
-		"prefix": "gen", "theme": -1, "save_id": 4,
+		"prefix": "gen", "theme": -1, "save_id": 4, "kind": "procedural", "endless_track": 5,
 		"tracks": ["Sprint", "Marathon", "Labyrinth", "Tightrope", "Gauntlet", "ENDLESS"],
 	},
 	{
 		"name": "SETTINGS",
 		"sub": "build your own track",
 		"color": Color(0.6, 0.6, 0.68),
-		"prefix": "custom", "theme": -1, "save_id": 5,
+		"prefix": "custom", "theme": -1, "save_id": 5, "kind": "settings",
 		"tracks": [],
 	},
 ]
@@ -101,7 +101,7 @@ func _ready():
 		if GROUPS[g]["save_id"] == GameState.menu_group:
 			_sel = g
 	_update_home()
-	if Music._current_group < 0:
+	if Music.current_group < 0:
 		Music.play_for_group(1)
 
 func _key(event, keycode) -> bool:
@@ -248,14 +248,16 @@ func _update_home():
 func _group_subtitle(g: int) -> String:
 	var info: Dictionary = GROUPS[g]
 	var sub: String = info["sub"]
-	if info["save_id"] <= 4 and info["tracks"].size() > 0:
+	if info["tracks"].size() > 0:
+		# ENDLESS can never be marked completed - keep it out of the count
+		var total: int = info["tracks"].size() - (1 if info.has("endless_track") else 0)
 		var done := 0
-		for t in info["tracks"].size():
+		for t in total:
 			if GameState.is_completed(info["save_id"], t):
 				done += 1
 		if done > 0:
-			sub += "  -  %d/%d" % [done, info["tracks"].size()]
-	if info["save_id"] == 4 and GameState.endless_best_dist > 0.0:
+			sub += "  -  %d/%d" % [done, total]
+	if info.has("endless_track") and GameState.endless_best_dist > 0.0:
 		sub += "  -  endless best %dm" % int(GameState.endless_best_dist)
 	return sub
 
@@ -283,7 +285,7 @@ func _open_group(g: int):
 	title.add_theme_font_size_override("font_size", 44)
 	_sub_root.add_child(title)
 
-	var rows: int = CUSTOM_NAMES.size() if g == 4 else info["tracks"].size()
+	var rows: int = CUSTOM_NAMES.size() if info["kind"] == "settings" else info["tracks"].size()
 	_sub_labels.clear()
 	for i in rows:
 		var frac := 0.30 + i * 0.062
@@ -298,7 +300,7 @@ func _open_group(g: int):
 		_sub_labels.append(l)
 
 	var hint := Label.new()
-	hint.text = "A/D or Z/X: adjust   |   Enter: launch   |   Esc: back" if g == 4 \
+	hint.text = "A/D or Z/X: adjust   |   Enter: launch   |   Esc: back" if info["kind"] == "settings" \
 		else "Enter: launch   |   Esc: back"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.anchor_right = 1
@@ -309,7 +311,7 @@ func _open_group(g: int):
 	hint.add_theme_font_size_override("font_size", 12)
 	_sub_root.add_child(hint)
 
-	if g == 4:
+	if info["kind"] == "settings":
 		_screen = SCREEN_SETTINGS
 		_update_settings()
 	else:
@@ -328,7 +330,8 @@ func _update_tracks():
 	for t in _sub_labels.size():
 		var name_str: String = info["tracks"][t]
 		var display := name_str
-		if info["save_id"] == 4 and t == 5:
+		var is_endless: bool = info.get("endless_track", -1) == t
+		if is_endless:
 			if GameState.endless_best_dist > 0.0:
 				display += "  [%dm]" % int(GameState.endless_best_dist)
 		else:
@@ -338,7 +341,6 @@ func _update_tracks():
 			elif GameState.is_completed(info["save_id"], t):
 				display += "  [OK]"
 		var selected := t == _track
-		var is_endless: bool = info["save_id"] == 4 and t == 5
 		var col: Color
 		if selected:
 			col = Color(1.0, 0.35, 0.35) if is_endless else Color(1, 1, 1)
@@ -358,7 +360,6 @@ func _update_settings():
 # ---------------- launching ----------------
 
 func _start_game():
-	GameState.is_generated = false
 	GameState.is_endless = false
 	GameState.generated_content = ""
 	GameState.endless_params = {}
@@ -366,20 +367,20 @@ func _start_game():
 	GameState.menu_track = _track
 
 	var info: Dictionary = GROUPS[_sel]
-	if _sel == 3:  # PROCEDURAL
+	# Custom-settings tracks have no stable identity to record against
+	GameState.run_records = info["kind"] != "settings"
+	if info["kind"] == "procedural":
 		var preset: Dictionary = GEN_PRESETS[_track].duplicate()
 		preset["seed"] = randi()
 		preset["min_height"] = 1
 		GameState.selected_group = preset["theme"]
-		GameState.selected_track = _track
-		GameState.is_generated = true
 		GameState.gen_params = preset.duplicate()
 		if preset.get("endless", false):
 			GameState.is_endless = true
 			preset["length"] = 300
 			GameState.endless_params = preset.duplicate()
 		GameState.generated_content = LevelGenerator.generate(preset)
-	elif _sel == 4:  # SETTINGS / custom track
+	elif info["kind"] == "settings":
 		var params := {
 			"length": CUSTOM_OPTIONS[0][_cidx(0)],
 			"min_height": 1,
@@ -393,13 +394,10 @@ func _start_game():
 			"seed": randi(),
 		}
 		GameState.selected_group = params["theme"]
-		GameState.selected_track = 0
-		GameState.is_generated = true
 		GameState.gen_params = params.duplicate()
 		GameState.generated_content = LevelGenerator.generate(params)
 	else:
 		GameState.selected_group = info["theme"]
-		GameState.selected_track = _track
 		GameState.selected_level = "res://Levels/%s_%d.txt" % [info["prefix"], _track + 1]
 
 	get_tree().change_scene_to_file("res://Scenes/Game.tscn")
@@ -413,17 +411,20 @@ func _open_load_dialog():
 	dialog.size = Vector2i(600, 400)
 	dialog.file_selected.connect(func(path: String):
 		var file := FileAccess.open(path, FileAccess.READ)
-		if file:
-			var content := file.get_as_text()
-			file.close()
-			if content.strip_edges() != "":
-				GameState.is_generated = true
-				GameState.is_endless = false
-				GameState.gen_params = {}
-				GameState.selected_group = 1
-				GameState.selected_track = 0
-				GameState.generated_content = content
-				get_tree().change_scene_to_file("res://Scenes/Game.tscn")
+		if file == null:
+			printerr("Failed to open track file: %s" % path)
+			return
+		var content := file.get_as_text()
+		file.close()
+		if content.strip_edges() == "":
+			printerr("Track file is empty: %s" % path)
+			return
+		GameState.run_records = false
+		GameState.is_endless = false
+		GameState.gen_params = {}
+		GameState.selected_group = 1
+		GameState.generated_content = content
+		get_tree().change_scene_to_file("res://Scenes/Game.tscn")
 	)
 	add_child(dialog)
 	dialog.popup_centered()
@@ -432,7 +433,7 @@ func _import_share_code():
 	var clipboard := DisplayServer.clipboard_get().strip_edges()
 	if clipboard == "":
 		return
-	GameState.is_generated = true
+	GameState.run_records = false
 	GameState.is_endless = false
 	GameState.gen_params = {}
 
@@ -440,11 +441,9 @@ func _import_share_code():
 	if not params.is_empty():
 		GameState.gen_params = params.duplicate()
 		GameState.selected_group = params.get("theme", 1)
-		GameState.selected_track = 0
 		GameState.generated_content = LevelGenerator.generate(params)
 	else:
 		GameState.selected_group = 1
-		GameState.selected_track = 0
 		GameState.generated_content = clipboard
 
 	get_tree().change_scene_to_file("res://Scenes/Game.tscn")

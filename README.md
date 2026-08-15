@@ -12,7 +12,9 @@ Web version: https://needlefi.itch.io/gaasroads
 
 ## Features
 
-- 20 tracks across 4 themed groups (Cosmic Highway, Nebula Run, Solar Burn, Dark Matter)
+- 15 authored tracks across 3 themed groups (Nebula Run, Solar Burn, Dark Matter)
+- Procedural presets, custom track settings and endless mode
+- Track sharing: compact paste codes for generated tracks, raw text for the rest
 - ASCII text file-based level design
 - Speed control, jumping, lane-based elevation
 - Per-group gravity tuning and visual themes
@@ -22,9 +24,10 @@ Web version: https://needlefi.itch.io/gaasroads
 
 ## Controls
 
-- Arrow keys: steer left/right, speed up/down
+- Arrow keys or WASD: steer left/right, speed up/down
 - Space: jump
-- Escape: back to menu
+- C: share track — V (in menu): paste a shared track, L: load a track file
+- Escape or Q: back to menu
 
 ## Web build
 

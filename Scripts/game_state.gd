@@ -5,11 +5,9 @@ extends Node
 var cockpit_texture: Texture2D = preload("res://cockpit.png")
 var background_texture: Texture2D = preload("res://background.png")
 
-var selected_level := "res://Levels/level1.txt"
+var selected_level := "res://Levels/nebula_1.txt"
 var selected_group := 1
-var selected_track := 0
 var generated_content := ""
-var is_generated := false
 var is_endless := false
 var endless_params := {}
 var gen_params := {}
@@ -21,31 +19,33 @@ var classical_mode := true
 var autopilot := false
 var menu_group := 1
 var menu_track := 0
+# Only menu-launched tracks may record completions/best times; imported or
+# file-loaded tracks have no menu identity to record against.
+var run_records := false
 
-const SAVE_PATH := "user://completed.cfg"
+var save_path := "user://completed.cfg"
 var _completed: Dictionary = {}
 var _best_times: Dictionary = {}
 var _status_label: Label
-
-func _ready():
-	_load()
-	_build_status_overlay()
-
 var _status_init := false
 var _s_music := false
 var _s_sfx := true
 var _s_mode := false
 var _s_ap := false
 
+func _ready():
+	_load()
+	_build_status_overlay()
+
 func _process(_delta):
 	if _status_label == null:
 		return
 	# Rebuild the status line only when a flag actually changed
-	if _status_init and Music._enabled == _s_music and sfx_enabled == _s_sfx \
+	if _status_init and Music.enabled == _s_music and sfx_enabled == _s_sfx \
 			and classical_mode == _s_mode and autopilot == _s_ap:
 		return
 	_status_init = true
-	_s_music = Music._enabled
+	_s_music = Music.enabled
 	_s_sfx = sfx_enabled
 	_s_mode = classical_mode
 	_s_ap = autopilot
@@ -112,15 +112,17 @@ func decode_share_code(code: String) -> Dictionary:
 	var parts := code.strip_edges().split(":")
 	if parts.size() < 10 or parts[0] != "GAAS":
 		return {}
+	# Share codes are pasted clipboard text: clamp every field to the ranges
+	# the settings screen offers, or a hostile length hangs the generator.
 	return {
-		"length": parts[1].to_int(),
-		"max_height": parts[2].to_int(),
-		"tunnel_weight": parts[3].to_int(),
-		"narrow_weight": parts[4].to_int(),
-		"gap_weight": parts[5].to_int(),
-		"tunnel_lane_weight": parts[6].to_int(),
-		"sharpness": parts[7].to_float(),
-		"theme": parts[8].to_int(),
+		"length": clampi(parts[1].to_int(), 1, 2000),
+		"max_height": clampi(parts[2].to_int(), 2, 8),
+		"tunnel_weight": clampi(parts[3].to_int(), 0, 50),
+		"narrow_weight": clampi(parts[4].to_int(), 0, 50),
+		"gap_weight": clampi(parts[5].to_int(), 0, 50),
+		"tunnel_lane_weight": clampi(parts[6].to_int(), 0, 50),
+		"sharpness": clampf(parts[7].to_float(), 0.01, 0.5),
+		"theme": clampi(parts[8].to_int(), 0, 3),
 		"seed": parts[9].to_int(),
 		"min_height": 1,
 	}
@@ -152,11 +154,11 @@ func _save():
 		config.set_value("custom", str(i), custom_idx[i])
 	if endless_best_dist > 0.0:
 		config.set_value("endless", "best_dist", endless_best_dist)
-	config.save(SAVE_PATH)
+	config.save(save_path)
 
 func _load():
 	var config := ConfigFile.new()
-	if config.load(SAVE_PATH) == OK:
+	if config.load(save_path) == OK:
 		if config.has_section("completed"):
 			for key in config.get_section_keys("completed"):
 				_completed[key] = true

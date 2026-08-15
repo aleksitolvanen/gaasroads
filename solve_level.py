@@ -10,7 +10,7 @@ frame-perfect tricks may be rejected - by design.
 
 Simulates CLASSICAL mode by default (the game's default): lateral speed
 scales with throttle (25%-60% of 15 u/s), steering locks at takeoff for the
-whole jump, and the coyote window is y < floor+0.4 with vy < 0. Pass
+whole jump, and the coyote window is y < floor+0.4 with -2.5 < vy < 0. Pass
 --normal for the free-steering dev mode.
 
 Usage:
@@ -19,10 +19,12 @@ Usage:
   python solve_level.py file.txt --theme 2 --tape tape.txt --normal
 """
 import argparse
+import glob
 import heapq
 import math
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 DT = 1.0 / 60.0
@@ -137,9 +139,9 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
             ja = False
         else:
             vy -= grav * DT
-            # The game banks can_jump forever after leaving the floor (one
-            # free air-jump - an exploit). Strict mode expires it with the
-            # coyote window so verdicts reflect intended physics.
+            # ship.gd expires the banked jump with the coyote window; strict
+            # mode (default) mirrors that. --exploits models the pre-fix
+            # physics that banked one free air-jump forever.
             if strict and cj and not in_coyote(y, vy, lfy):
                 cj = False
 
@@ -236,8 +238,6 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
             return (nu, nx, ny, vy, spd, cj, lfy, ja, lv), False, True
         return (nu, nx, ny, vy, spd, cj, lfy, ja, lv), False, False
 
-    from collections import deque
-
     start = (0.0, 9.0, 1.0, 0.0, 12.0, True, 1.0, False, 0.0)
     sb = bucket(start)
     visited = {sb}
@@ -313,19 +313,28 @@ def main():
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--tape", default=None)
     ap.add_argument("--exploits", action="store_true",
-                    help="allow banked air-jumps (physics as shipped)")
+                    help="allow banked air-jumps (pre-fix shipped physics)")
     ap.add_argument("--normal", action="store_true",
                     help="simulate normal mode (free air steering) instead of classical")
     ap.add_argument("--stall", type=int, default=400_000)
     args = ap.parse_args()
 
-    files = args.files or sorted(str(p) for p in Path("Levels").glob("*.txt"))
+    # expand wildcards ourselves - Windows shells pass them through literally
+    files = []
+    for pat in args.files:
+        files.extend(sorted(glob.glob(pat)) or [pat])
+    files = files or sorted(str(p) for p in Path("Levels").glob("*.txt"))
     any_fail = False
     for f in files:
         theme = args.theme
         if theme is None:
             theme = THEMES.get(Path(f).stem.split("_")[0], 0)
-        tops, tun = load_level(f)
+        try:
+            tops, tun = load_level(f)
+        except OSError as e:
+            print(f"{Path(f).name:<15} unreadable: {e}", file=sys.stderr)
+            any_fail = True
+            continue
         t0 = time.monotonic()
         verdict, u, states, tape = solve(
             tops, tun, GROUP_GRAVITY[theme], GROUP_JUMP[theme], args.budget,

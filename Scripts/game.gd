@@ -4,15 +4,14 @@ var level_path: String
 
 const TILE_SIZE := 2.0
 const TILE_HEIGHT := 0.5
-const TUNNEL_CLEARANCE := 3.5
 
-var _fallback_level := [
+const _FALLBACK_LEVEL := [
 	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
 	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
 	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
-	"1.1.1.......1.1.1.", "1.1.1.......1.1.1.",
+	"1.1.1.........1.1.1.", "1.1.1.........1.1.1.",
 	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
-	"1...............1.", "1...............1.",
+	"1.................1.", "1.................1.",
 	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
 	"1.1.1.1.1.1.1.1.1.1.", "1.1.1.1.1.1.1.1.1.1.",
 	"1T1T1T1T1T1T1T1T1T1T", "1T1T1T1T1T1T1T1T1T1T",
@@ -29,6 +28,7 @@ var _speed_gauge: ProgressBar
 var _speed_label: Label
 var _hud_canvas: CanvasLayer
 var _level_end_z := -1000.0
+var _env_end_z := -1000.0
 var _finishing := false
 var _laser_timer := 0.0
 var _laser_rng := RandomNumberGenerator.new()
@@ -77,11 +77,12 @@ func _ready():
 	process_physics_priority = 1
 	GameState.elapsed_time = 0.0
 	_timer_running = false
-	_create_space_environment()
 	_create_hud()
 	_init_track_materials()
 	_create_shader_warmup()
+	# Load first: the backgrounds size themselves from _level_end_z
 	_load_level()
+	_create_space_environment()
 	Music.play_for_group(GameState.selected_group)
 
 func _process(delta):
@@ -286,6 +287,8 @@ func _create_hud():
 	canvas.add_child(_ready_label)
 
 func _create_space_environment():
+	# Endless tracks keep extending, so give them a deep decoration horizon
+	_env_end_z = minf(_level_end_z, -2500.0) if GameState.is_endless else _level_end_z
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.0, 0.0, 0.0)
@@ -388,7 +391,7 @@ func _create_nebula_background():
 	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	star_mesh.material = star_mat
 
-	var star_z_min := minf(-400, _level_end_z - 100)
+	var star_z_min := minf(-400, _env_end_z - 100)
 	var star_count := maxi(1200, int(absf(star_z_min) * 2))
 
 	var multi_mesh := MultiMesh.new()
@@ -433,7 +436,7 @@ func _create_nebula_background():
 	add_child(disk_instance)
 
 	# Rings along the track to fly through
-	var track_length := absf(_level_end_z)
+	var track_length := absf(_env_end_z)
 	var ring_spacing := 250.0
 	var ring_count := int(track_length / ring_spacing)
 
@@ -519,7 +522,9 @@ func _create_nebula_background():
 		haze_mat.emission = ring_emission
 		haze_mat.emission_energy_multiplier = 0.8
 		haze_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		haze_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		# Front faces culled: one glow layer from outside, one from inside,
+		# instead of double full-screen overdraw when flying through
+		haze_mat.cull_mode = BaseMaterial3D.CULL_FRONT
 		haze_mesh.material = haze_mat
 		haze.mesh = haze_mesh
 		ring_root.add_child(haze)
@@ -557,7 +562,7 @@ func _create_solar_background():
 	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	star_mesh.material = star_mat
 
-	var solar_z_min := minf(-400, _level_end_z - 100)
+	var solar_z_min := minf(-400, _env_end_z - 100)
 	var solar_star_count := maxi(400, int(absf(solar_z_min) * 0.8))
 
 	var multi_mesh := MultiMesh.new()
@@ -638,7 +643,7 @@ func _create_solar_background():
 	haze_mat.emission = Color(1.0, 0.4, 0.05)
 	haze_mat.emission_energy_multiplier = 1.5
 	haze_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	haze_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	haze_mat.cull_mode = BaseMaterial3D.CULL_FRONT
 	haze_mesh.material = haze_mat
 
 	var haze := MeshInstance3D.new()
@@ -681,7 +686,7 @@ func _create_dark_matter_background():
 	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	star_mesh.material = star_mat
 
-	var dark_z_min := minf(-500, _level_end_z - 100)
+	var dark_z_min := minf(-500, _env_end_z - 100)
 	var dark_star_count := maxi(500, int(absf(dark_z_min)))
 
 	var multi_mesh := MultiMesh.new()
@@ -727,7 +732,7 @@ func _create_dark_matter_background():
 	red_glow_mat.emission_energy_multiplier = 2.5
 
 	# Spawn mothership groups along the track
-	var track_length := absf(_level_end_z)
+	var track_length := absf(_env_end_z)
 	var fleet_spacing := 400.0
 	var fleet_count := maxi(1, int(track_length / fleet_spacing))
 
@@ -939,7 +944,7 @@ func _build_mothership(ship_root: Node3D, hull_mat: StandardMaterial3D, glow_mat
 	aura_mat.emission = Color(0.05, 0.15, 0.1)
 	aura_mat.emission_energy_multiplier = 1.0
 	aura_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	aura_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	aura_mat.cull_mode = BaseMaterial3D.CULL_FRONT
 	var aura_mesh := SphereMesh.new()
 	aura_mesh.radius = 55.0
 	aura_mesh.height = 110.0
@@ -1133,7 +1138,7 @@ func _load_level():
 
 	if content == "":
 		printerr("Failed to open level file: %s - using built-in level" % level_path)
-		content = "\n".join(_fallback_level)
+		content = "\n".join(_FALLBACK_LEVEL)
 		var warn := Label.new()
 		warn.text = "FALLBACK LEVEL - file not found: %s" % level_path
 		warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1539,14 +1544,26 @@ func _create_shader_warmup():
 
 func _unhandled_input(event):
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_C and not _finishing:
-			if _share_open:
-				_close_share_dialog()
-			else:
-				_open_share_dialog()
-		elif event.keycode == KEY_ESCAPE and _share_open:
-			_close_share_dialog()
-			get_viewport().set_input_as_handled()
+		if event.keycode == KEY_C and not _finishing and not _share_open:
+			_open_share_dialog()
+
+# The tree is paused while the dialog is open and the Game node is pausable,
+# so its own _unhandled_input never sees the close keys - they must live on
+# an always-processing node inside the dialog.
+class ShareDialogKeys extends Node:
+	signal close_requested
+	func _unhandled_input(event):
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode == KEY_C or event.keycode == KEY_ESCAPE:
+				close_requested.emit()
+				get_viewport().set_input_as_handled()
+
+func _share_payload() -> String:
+	# Generated tracks share as a compact reproducible code; authored or
+	# imported content falls back to the raw row text.
+	if not GameState.is_endless and not GameState.gen_params.is_empty():
+		return GameState.encode_share_code(GameState.gen_params)
+	return _level_content
 
 func _open_share_dialog():
 	_share_open = true
@@ -1559,6 +1576,11 @@ func _open_share_dialog():
 	panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	_share_panel = panel
 	_hud_canvas.add_child(panel)
+
+	var keys := ShareDialogKeys.new()
+	keys.process_mode = Node.PROCESS_MODE_ALWAYS
+	keys.close_requested.connect(_close_share_dialog)
+	panel.add_child(keys)
 
 	var title := Label.new()
 	title.text = "SHARE TRACK"
@@ -1581,7 +1603,7 @@ func _open_share_dialog():
 	panel.add_child(hint)
 
 	_share_text = LineEdit.new()
-	_share_text.text = _level_content
+	_share_text.text = _share_payload()
 	_share_text.anchor_left = 0.05
 	_share_text.anchor_right = 0.95
 	_share_text.offset_top = 80
@@ -1622,7 +1644,7 @@ func _open_share_dialog():
 	copy_btn.grab_focus.call_deferred()
 
 func _on_copy_pressed(btn: Button):
-	DisplayServer.clipboard_set(_level_content)
+	DisplayServer.clipboard_set(_share_payload())
 	btn.text = "Copied!"
 
 func _close_share_dialog():
@@ -1674,7 +1696,7 @@ func _create_warp_streaks():
 		tween.tween_property(streak, "scale:z", stretch, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 func _on_ship_warped():
-	if not GameState.is_endless and not GameState.autopilot:
+	if not GameState.is_endless and not GameState.autopilot and GameState.run_records:
 		GameState.mark_completed(GameState.menu_group, GameState.menu_track)
 	get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
 

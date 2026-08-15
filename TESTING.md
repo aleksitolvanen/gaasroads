@@ -9,27 +9,33 @@ repo root.
 
 ## Test inventory
 
-### 1. Autopilot regression — `Scripts/test_autopilot.gd`
+### 1. Autopilot regression — `tests/test_autopilot.gd`
 
-Self-contained simulation of the heuristic autopilot against the first two
-authored levels of each group.
+Simulates the shared `Autopilot` heuristic (`Scripts/autopilot.gd` — the same
+code the in-game P-key autopilot runs) against the first two authored levels
+of each group, under each group's real gravity/jump physics.
 
-    godot --headless --path . -s Scripts/test_autopilot.gd
+    godot --headless --path . -s tests/test_autopilot.gd
 
-Prints a per-level result and a success rate. This tests the *autopilot
-heuristic*, not level completability — a failure here means the autopilot is
-weak, not that the level is broken (use the solver for that).
+Prints a per-level result and a success rate; exits non-zero below 4/6. This
+tests the *autopilot heuristic*, not level completability — a failure here
+means the autopilot is weak, not that the level is broken (use the solver for
+that).
 
 ### 2. Generator constraints — `tests/gen_constraints.gd`
 
 Generates 320 tracks (80 per theme) at maximum difficulty settings and
 statically verifies the invariants the generator guarantees: climbable steps,
-gaps within the run-up/air-time budget, landings at or below takeoff height.
+gaps within the run-up/air-time budget, landings at or below takeoff height,
+and tunnel bores that are flat, gap-free and enterable without a jump.
 
     godot --headless --path . -s tests/gen_constraints.gd
 
-Pass: `checked 320 tracks, 0 violations`. The limit formulas in this script
-mirror `LevelGenerator.chunk_begin()` — when you change one, change both.
+Pass: `checked 320 tracks, 0 violations`. Limits come from
+`LevelGenerator.jump_limits()` / `_max_gap_rows()` — the generator's own
+formulas — and the ship performance constants (`SHIP_ACCEL`,
+`SHIP_MAX_SPEED`, `SHIP_LATERAL_SPEED`) are asserted against `ship.gd`'s
+export defaults, so constant drift fails this test instead of hiding.
 
 ### 3. Gameplay smokes — `tests/smoke_*.gd`
 
@@ -43,7 +49,17 @@ endless chunking/cleanup/death-reset.
 
 Each prints `... SMOKE OK` on success.
 
-### 4. Reachability solver — `solve_level.py`
+### 4. Save/session state — `tests/test_save_state.gd`
+
+Save-file round-trip (completions, best-time ordering, custom settings,
+endless best) and share-code decode validation (malformed and hostile
+codes), against a throwaway save file.
+
+    godot --headless --path . -s tests/test_save_state.gd
+
+Pass: `SAVE STATE OK`, exit code 0.
+
+### 5. Reachability solver — `solve_level.py`
 
 Proves whether a level can be completed by searching the full input space
 against a Python port of the ship physics. `COMPLETABLE` always comes with a
@@ -68,7 +84,7 @@ Flags:
 | `--budget S` | wall-clock seconds per level (default 60) |
 | `--k N` | ticks each input is held; 3 = 20 Hz decisions (lower = superhuman precision) |
 | `--stall N` | expansions without frontier progress before giving up (default 400k) |
-| `--exploits` | allow the banked air-jump (physics as shipped; default models intended physics) |
+| `--exploits` | allow the banked air-jump (pre-fix shipped physics; the game now expires it with the coyote window) |
 | `--normal` | simulate normal mode (free air steering) instead of classical |
 | `--tape F` | write the winning input tape (`W/S` + `A/D` + `J` per line) |
 
@@ -79,7 +95,7 @@ jumps) can hide behind millions of states — before trusting a "no" on a
 suspicious level, retry with `--stall 5000000 --budget 600`. State bucketing
 can in principle cause a false "no", never a false "yes".
 
-### 5. Track texture analyzer — `analyze_levels.py`
+### 6. Track texture analyzer — `analyze_levels.py`
 
 Quantifies how "eventful" a track is row by row, for tuning the generator
 against the extracted SkyRoads roads (`tests/skyroads/`, local only). The
@@ -99,10 +115,10 @@ Authored sets are regenerated reproducibly with fixed seeds:
 
     godot --headless --path . -s tests/regen_levels.gd
 
-then re-verify with the solver (step 4) — every regenerated level must be
+then re-verify with the solver (step 5) — every regenerated level must be
 `COMPLETABLE`. Originals live in `raw/levels_original/`.
 
-### 6. Adversarial probes — `tests/make_adversarial.py`
+### 7. Adversarial probes — `tests/make_adversarial.py`
 
 Corner-case levels for validating the *solver* (and for documenting what the
 movement system really allows):
@@ -136,15 +152,18 @@ table is a movement-tech regression snapshot, not a pass/fail suite.
 ## When game mechanics change
 
 The ship physics is intentionally mirrored in several places. Change one,
-sync the rest, rerun everything:
+sync the rest, rerun everything. (The autopilot *heuristic* is not mirrored —
+`Scripts/autopilot.gd` is shared by the game and the sim; only the physics
+loop around it is.)
 
 | What changed | Update |
 |---|---|
-| Ship movement (`Scripts/ship.gd`: accel, max/lateral speed, bounce, coyote rule, jump handling) | `solve_level.py` header constants + `tick()` logic; gap/step formulas in `LevelGenerator.chunk_begin()` and `tests/gen_constraints.gd` |
-| Classical-mode rules (`ship.gd`: throttle-scaled steering, takeoff lock, classical coyote window) | `in_coyote()` + the classical branches in `solve_level.py::tick()`; the sim in `Scripts/test_autopilot.gd`; the rail-hop spacing cap in `LevelGenerator._pat_rails()` |
+| Ship movement (`Scripts/ship.gd`: accel, max/lateral speed, bounce, coyote rule, jump handling, banked-jump expiry) | accel / max speed / lateral speed live as `LevelGenerator.SHIP_*` consts and `tests/gen_constraints.gd` asserts `ship.gd` matches; `solve_level.py` header constants + `tick()` logic; the sim loop in `tests/test_autopilot.gd` |
+| Classical-mode rules (`ship.gd`: throttle-scaled steering, takeoff lock, classical coyote window) | `in_coyote()` + the classical branches in `solve_level.py::tick()`; the sim in `tests/test_autopilot.gd`; the rail-hop spacing cap in `LevelGenerator._pat_rails()` |
 | Per-group gravity/jump | `LevelGenerator.GROUP_GRAVITY` / `GROUP_JUMP_VELOCITY` (single source for game + generator), and the same two arrays in `solve_level.py` |
 | Ship collision box (`Scenes/Ship.tscn`) | `HALF_W/HALF_L/HALF_H` in `solve_level.py` |
-| Tile size / tunnel arch geometry (`Scripts/game.gd`) | `TUNNEL_OPEN` / `TUNNEL_CEIL` and tile math in `solve_level.py`; `TILE_SIZE`-derived constants in `Scripts/test_autopilot.gd` |
+| Tile size / tunnel arch geometry (`Scripts/game.gd`) | `TUNNEL_OPEN` / `TUNNEL_CEIL` and tile math in `solve_level.py`; `TILE_SIZE`-derived constants in `tests/test_autopilot.gd` and `Scripts/autopilot.gd` |
+| Runway prelude (24 rows, cols 2-7, height 1 — `game.gd::_start_track`) | the runway copies in `tests/test_autopilot.gd` and `solve_level.py::load_level` (incl. its `- 24` row offset when reporting) |
 | Generator segment shapes | invariants in `tests/gen_constraints.gd` |
 
 Then, in order:

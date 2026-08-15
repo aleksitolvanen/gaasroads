@@ -2,7 +2,7 @@
 # through the Music autoload.
 #
 # Run:  godot --headless --path . -s tests/smoke_music.gd
-# Pass: one "group N" line per track + "MUSIC SMOKE OK".
+# Pass: one "group N" line per track + "MUSIC SMOKE OK", exit code 0.
 extends SceneTree
 
 var _done := false
@@ -14,16 +14,21 @@ func _process(_delta) -> bool:
 	var music = root.get_node_or_null("Music")
 	if music == null:
 		printerr("FAIL: Music autoload missing")
+		quit(1)
 		return true
 	music.toggle()
 	for g in 4:
 		music.play_for_group(g)
 		var player: AudioStreamPlayer = music._player
-		assert(player.playing, "player not playing for group %d" % g)
-		assert(player.stream != null, "no stream for group %d" % g)
-		assert(player.stream.loop, "stream not looping for group %d" % g)
+		if not player.playing or player.stream == null or not player.stream.loop:
+			printerr("FAIL: group %d not playing a looping stream" % g)
+			quit(1)
+			return true
 		print("group %d: %s len=%.2fs loop=%s" % [g, player.stream.resource_path, player.stream.get_length(), player.stream.loop])
 	music.toggle()
-	assert(not music._player.playing, "player still playing after toggle off")
+	if music._player.playing:
+		printerr("FAIL: player still playing after toggle off")
+		quit(1)
+		return true
 	print("MUSIC SMOKE OK")
 	return true

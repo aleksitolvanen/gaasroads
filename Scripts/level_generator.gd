@@ -19,6 +19,13 @@ const W := 10
 const GROUP_GRAVITY: Array[float] = [20.0, 20.0, 12.0, 8.0]
 const GROUP_JUMP_VELOCITY: Array[float] = [8.0, 8.0, 10.0, 7.8]
 
+# Ship performance the gap/drift budgets assume. ship.gd's export defaults
+# must match - tests/gen_constraints.gd asserts they do.
+const SHIP_ACCEL := 12.0
+const SHIP_MAX_SPEED := 30.0
+const SHIP_LATERAL_SPEED := 15.0
+const CLASSICAL_DRIFT_FRACTION := 0.6  # peak classical steer scale: 0.25 + 0.35 at full throttle
+
 enum { PAT_RHYTHM, PAT_CHICANE, PAT_STAIRS, PAT_TUNNEL, PAT_ISLANDS, PAT_LEDGE, PAT_SPLIT, PAT_SPEEDWAY, PAT_GATES, PAT_RAILS, PAT_CHECKER }
 const PATTERN_POOL := [PAT_RHYTHM, PAT_CHICANE, PAT_STAIRS, PAT_TUNNEL, PAT_ISLANDS, PAT_LEDGE, PAT_SPLIT, PAT_GATES, PAT_RAILS, PAT_CHECKER, PAT_SPEEDWAY]
 
@@ -33,18 +40,7 @@ static func chunk_begin(p: Dictionary) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = p.get("seed", randi())
 	var theme: int = clampi(p.get("theme", 0), 0, 3)
-	var grav: float = GROUP_GRAVITY[theme]
-	var jv: float = GROUP_JUMP_VELOCITY[theme]
-	# Completability limits from the group's jump physics (tile height 0.5):
-	# max_step = tallest climbable wall in tile units (jump peak jv^2/2g with
-	# a 15% margin); air_time = full flat-ground jump duration.
-	var jump_peak := jv * jv / (2.0 * grav)
-	var max_step := maxi(1, int(jump_peak * 0.85 / 0.5))
-	var lim := {
-		"max_step": max_step,
-		"entry_h": 1 + max_step,
-		"air_time": 2.0 * jv / grav,
-	}
+	var lim := jump_limits(theme)
 	var weights: int = p.get("tunnel_weight", 10) + p.get("narrow_weight", 15) \
 		+ p.get("gap_weight", 10) + p.get("tunnel_lane_weight", 8)
 	var base_diff := clampf(0.45 + 0.04 * (p.get("max_height", 4) - 3)
@@ -143,6 +139,21 @@ static func chunk_begin(p: Dictionary) -> Dictionary:
 	if state.sig == PAT_TUNNEL:
 		state.force_tunnel = false
 	return state
+
+# Completability limits from the group's jump physics (tile height 0.5):
+# max_step = tallest climbable wall in tile units (jump peak jv^2/2g with
+# a 15% margin); air_time = full flat-ground jump duration.
+# tests/gen_constraints.gd verifies generated geometry against these.
+static func jump_limits(theme: int) -> Dictionary:
+	var grav: float = GROUP_GRAVITY[theme]
+	var jv: float = GROUP_JUMP_VELOCITY[theme]
+	var jump_peak := jv * jv / (2.0 * grav)
+	var max_step := maxi(1, int(jump_peak * 0.85 / 0.5))
+	return {
+		"max_step": max_step,
+		"entry_h": 1 + max_step,
+		"air_time": 2.0 * jv / grav,
+	}
 
 # Random intensity envelope: intro, 2-3 waves (build, peak, breather) with
 # rising peaks, then a finale and outro. Fractions and levels all jittered.
@@ -474,14 +485,14 @@ static func _pat_ledge(state: Dictionary, out: Array, it: float, budget: int):
 	var w := 2 - (1 if it > 0.65 else 0)
 	var pos := 0 if rng.randi() % 2 == 0 else W - w
 	_connect(state, out, pos, w, ifc.h)
-	var len_ := clampi(budget, 8, 12)
+	var seg_len := clampi(budget, 8, 12)
 	if rng.randf() < 0.4 and budget >= 14:
-		_lane_rows(state, out, len_ / 2)
+		_lane_rows(state, out, seg_len / 2)
 		var other := W - w - pos
 		_shift_lane(state, out, other, w, clampi(int((1.5 - it) * 7.0), 3, 9))
-		_lane_rows(state, out, len_ / 2)
+		_lane_rows(state, out, seg_len / 2)
 	else:
-		_lane_rows(state, out, len_)
+		_lane_rows(state, out, seg_len)
 
 # Fork: a wide safe lane beside a narrow direct one, then merge.
 static func _pat_split(state: Dictionary, out: Array, it: float, budget: int):
@@ -490,10 +501,10 @@ static func _pat_split(state: Dictionary, out: Array, it: float, budget: int):
 	var safe_w := rng.randi_range(3, 4)
 	var risky_w := 2 - (1 if it > 0.6 else 0)
 	var flip: bool = rng.randi() % 2 == 0
-	var len_ := clampi(budget - 6, 8, 16)
+	var seg_len := clampi(budget - 6, 8, 16)
 	_connect(state, out, 0, W, ifc.h)
 	_lane_rows(state, out, 2)
-	for _i in len_:
+	for _i in seg_len:
 		var r := _cells()
 		if flip:
 			_fill(r, 0, risky_w + 1, ifc.h)
@@ -517,14 +528,14 @@ static func _pat_speedway(state: Dictionary, out: Array, it: float, budget: int)
 	_connect(state, out, pos, w, ifc.h)
 	var req := clampf(lerpf(0.55, 1.0, it) + rng.randf_range(-0.05, 0.05), 0.5, 1.0)
 	var air: float = lim.air_time
-	var g := maxi(2, int(req * 30.0 * air / 2.0) - 1)
-	# run-up long enough to reach the required speed from zero (accel 12)
-	var runup := maxi(8, int(ceil(pow(req * 30.0, 2.0) / 48.0)) + 2)
+	var g := maxi(2, int(req * SHIP_MAX_SPEED * air / 2.0) - 1)
+	# run-up long enough to reach the required speed from zero
+	var runup := maxi(8, int(ceil(pow(req * SHIP_MAX_SPEED, 2.0) / (2.0 * SHIP_ACCEL * 2.0))) + 2)
 	# shrink the requirement until the set piece fits this stage
 	while req > 0.5 and runup + g + 6 > budget:
 		req -= 0.1
-		g = maxi(2, int(req * 30.0 * air / 2.0) - 1)
-		runup = maxi(8, int(ceil(pow(req * 30.0, 2.0) / 48.0)) + 2)
+		g = maxi(2, int(req * SHIP_MAX_SPEED * air / 2.0) - 1)
+		runup = maxi(8, int(ceil(pow(req * SHIP_MAX_SPEED, 2.0) / (2.0 * SHIP_ACCEL * 2.0))) + 2)
 	var gaps := 2 if budget >= 2 * (runup + g) + 6 else 1
 	# extra hard: the far side is a narrow strip you must aim for mid-flight
 	var narrow_landing: bool = it > 0.8 and rng.randf() < 0.55
@@ -591,8 +602,8 @@ static func _pat_rails(state: Dictionary, out: Array, it: float, budget: int):
 	var nrails := clampi(4 - int(it * 2.0), 2, 4)
 	var spacing := rw + rng.randi_range(1, 2)
 	# a dropout hop is a committed classical jump (steering locks at
-	# takeoff, max 60% of 15 u/s): cap rail separation to that drift
-	var max_sp := maxi(rw + 1, int(0.6 * 15.0 * float(state.lim.air_time) * 0.85 / 2.0))
+	# takeoff): cap rail separation to that drift
+	var max_sp := maxi(rw + 1, int(CLASSICAL_DRIFT_FRACTION * SHIP_LATERAL_SPEED * float(state.lim.air_time) * 0.85 / 2.0))
 	spacing = mini(spacing, max_sp)
 	var span := mini((nrails - 1) * spacing + rw, W)
 	var base := rng.randi_range(0, W - span)
@@ -674,9 +685,9 @@ static func _pat_checker(state: Dictionary, out: Array, it: float, budget: int):
 # Bring the current interface to the target lane and height: lateral bridge
 # first (contiguous fill covering both spans per row), then legal height
 # steps (climbs limited to max_step per landing).
-static func _connect(state: Dictionary, out: Array, tpos: int, tw_: int, th: int):
+static func _connect(state: Dictionary, out: Array, tpos: int, target_w: int, th: int):
 	var ifc: Dictionary = state.iface
-	if tpos != ifc.pos or tw_ != ifc.w:
+	if tpos != ifc.pos or target_w != ifc.w:
 		var sharp: float = state.p.get("sharpness", 0.12)
 		var dist := absi(tpos - ifc.pos)
 		var steps := clampi(int(float(maxi(dist, 1)) * clampf(0.6 - sharp, 0.15, 0.6) * 2.0), 2, 10)
@@ -686,13 +697,13 @@ static func _connect(state: Dictionary, out: Array, tpos: int, tw_: int, th: int
 		var prev_w: int = ifc.w
 		for _i in steps:
 			pos_f += stepv
-			var cur := clampi(roundi(pos_f), 0, W - tw_)
+			var cur := clampi(roundi(pos_f), 0, W - target_w)
 			var r := _cells()
-			_fill(r, mini(cur, prev), maxi(cur + tw_, prev + prev_w), ifc.h)
+			_fill(r, mini(cur, prev), maxi(cur + target_w, prev + prev_w), ifc.h)
 			out.append(_row_str(r))
 			prev = cur
-			prev_w = tw_
-		state.iface = {"pos": tpos, "w": tw_, "h": ifc.h}
+			prev_w = target_w
+		state.iface = {"pos": tpos, "w": target_w, "h": ifc.h}
 		ifc = state.iface
 	if th != ifc.h:
 		var lim: Dictionary = state.lim
@@ -704,19 +715,19 @@ static func _connect(state: Dictionary, out: Array, tpos: int, tw_: int, th: int
 			_lane_rows(state, out, 2)
 
 # Quick lane switch used inside patterns (bounded bridge).
-static func _shift_lane(state: Dictionary, out: Array, tpos: int, tw_: int, steps: int):
+static func _shift_lane(state: Dictionary, out: Array, tpos: int, target_w: int, steps: int):
 	var ifc: Dictionary = state.iface
 	var pos_f := float(ifc.pos)
 	var stepv := float(tpos - ifc.pos) / float(steps)
 	var prev: int = ifc.pos
 	for _i in steps:
 		pos_f += stepv
-		var cur := clampi(roundi(pos_f), 0, W - tw_)
+		var cur := clampi(roundi(pos_f), 0, W - target_w)
 		var r := _cells()
-		_fill(r, mini(cur, prev), maxi(cur + tw_, prev + tw_), ifc.h)
+		_fill(r, mini(cur, prev), maxi(cur + target_w, prev + target_w), ifc.h)
 		out.append(_row_str(r))
 		prev = cur
-	state.iface = {"pos": tpos, "w": tw_, "h": ifc.h}
+	state.iface = {"pos": tpos, "w": target_w, "h": ifc.h}
 
 static func _lane_rows(state: Dictionary, out: Array, n: int):
 	var ifc: Dictionary = state.iface
@@ -765,9 +776,9 @@ static func _deco_rows(state: Dictionary, out: Array, n: int, allow_ridge := tru
 	_lane_rows(state, out, 1)
 
 static func _max_gap_rows(runup_rows: int, lim: Dictionary) -> int:
-	# Top speed reachable over the run-up from a standstill (accel 12,
-	# max speed 30), then rows crossed in one full jump, minus a landing row
-	var v := minf(30.0, sqrt(2.0 * 12.0 * float(runup_rows) * 2.0))
+	# Top speed reachable over the run-up from a standstill, then rows
+	# crossed in one full jump, minus a landing row
+	var v := minf(SHIP_MAX_SPEED, sqrt(2.0 * SHIP_ACCEL * float(runup_rows) * 2.0))
 	var air_time: float = lim.air_time
 	return maxi(1, int(v * air_time / 2.0) - 1)
 

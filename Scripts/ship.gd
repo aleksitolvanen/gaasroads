@@ -18,7 +18,6 @@ var frozen := true
 var _vertical_velocity := 0.0
 var _was_on_floor := true
 var _last_floor_y := 0.0
-var _bounce_count := 0
 var _jump_airborne := false
 var _locked_lateral := 0.0
 var _can_jump := true
@@ -261,12 +260,12 @@ func _physics_process(delta):
 	if _state != State.NORMAL or frozen:
 		return
 
-	var _input_dir := 0.0
-	var _input_jump := false
+	var input_dir := 0.0
+	var input_jump := false
 	if GameState.autopilot:
 		var ap := _compute_autopilot()
-		_input_dir = ap.dir
-		_input_jump = ap.jump
+		input_dir = ap.dir
+		input_jump = ap.jump
 		if current_speed < ap.target_speed - 1.0:
 			current_speed += acceleration * delta
 		elif current_speed > ap.target_speed + 1.0:
@@ -277,10 +276,10 @@ func _physics_process(delta):
 		elif Input.is_action_pressed("ui_down") or Input.is_physical_key_pressed(KEY_S):
 			current_speed -= acceleration * delta
 		if Input.is_action_pressed("ui_left") or Input.is_physical_key_pressed(KEY_A):
-			_input_dir = -1.0
+			input_dir = -1.0
 		elif Input.is_action_pressed("ui_right") or Input.is_physical_key_pressed(KEY_D):
-			_input_dir = 1.0
-		_input_jump = Input.is_action_just_pressed("ui_accept")
+			input_dir = 1.0
+		input_jump = Input.is_action_just_pressed("ui_accept")
 	current_speed = clamp(current_speed, min_speed, max_speed)
 
 	# Engine glow and exhaust scale with speed
@@ -312,7 +311,7 @@ func _physics_process(delta):
 
 	# Lateral input
 	var lateral_input := 0.0
-	var dir := _input_dir
+	var dir := input_dir
 
 	if GameState.classical_mode:
 		var effective_lateral := dir * lateral_speed * (0.25 + 0.35 * speed_t)
@@ -342,7 +341,6 @@ func _physics_process(delta):
 				_land_player.play()
 		else:
 			_vertical_velocity = 0
-			_bounce_count = 0
 			_jump_airborne = false
 			_can_jump = true
 	else:
@@ -354,8 +352,13 @@ func _physics_process(delta):
 		near_floor = is_on_floor() or (global_position.y < _last_floor_y + 0.4 and _vertical_velocity < 0 and _vertical_velocity > -2.5)
 	else:
 		near_floor = is_on_floor() or (global_position.y < _last_floor_y + 0.55 and _vertical_velocity > -2.5)
+	# The banked jump expires with the coyote window - matches the physics
+	# solve_level.py proves (strict mode); without this, driving off a ledge
+	# banks one air-jump usable at any depth mid-fall
+	if not is_on_floor() and not near_floor:
+		_can_jump = false
 	var can_jump_now := _can_jump or near_floor
-	if _input_jump and can_jump_now:
+	if input_jump and can_jump_now:
 		_vertical_velocity = jump_velocity
 		_can_jump = false
 		if GameState.classical_mode:
@@ -505,186 +508,7 @@ func reset_ship():
 
 func _compute_autopilot() -> Dictionary:
 	var game = get_parent()
-	var grid: Array = game._grid
-	var grid_tunnels: Array = game._tunnels
-	var grid_cols: int = game._cols
-	if grid.is_empty():
-		return {"dir": 0.0, "target_speed": max_speed, "jump": false}
-
-	var tile_size := 2.0
-	var tile_h := 0.5  # TILE_HEIGHT
-	var pos := global_position
-	var current_row := int(-pos.z / tile_size)
-	var col_f := pos.x / tile_size
-	var current_col := clampi(roundi(col_f), 0, grid_cols - 1)
-	var airborne := not is_on_floor()
-
-	if current_row < 0 or current_row >= grid.size():
-		return {"dir": 0.0, "target_speed": max_speed, "jump": false}
-
-	var current_h: int = grid[current_row][current_col]
-	var jump_look := maxi(5, int(current_speed / 4.0))
-
-	# Tunnel detection
-	var in_tunnel := false
-	var tunnel_col_now := -1
-	if current_row < grid_tunnels.size():
-		for c in grid_cols:
-			if c < grid_tunnels[current_row].size() and grid_tunnels[current_row][c]:
-				in_tunnel = true
-				if tunnel_col_now < 0 or absf(float(c) - col_f) < absf(float(tunnel_col_now) - col_f):
-					tunnel_col_now = c
-	# Look ahead for upcoming tunnels
-	var tunnel_ahead_col := -1
-	var tunnel_ahead_dist := 999
-	if not in_tunnel:
-		for dr in range(1, 20):
-			var r := current_row + dr
-			if r >= grid_tunnels.size():
-				break
-			for c in grid_cols:
-				if c < grid_tunnels[r].size() and grid_tunnels[r][c]:
-					if tunnel_ahead_col < 0 or absf(float(c) - col_f) < absf(float(tunnel_ahead_col) - col_f):
-						tunnel_ahead_col = c
-					tunnel_ahead_dist = dr
-					break
-			if tunnel_ahead_col >= 0:
-				break
-
-	# Score each column by looking ahead
-	var look_ahead := 25
-	var best_col := current_col
-	var best_score := -9999.0
-
-	for c in grid_cols:
-		var score := 0.0
-		var prev_h := current_h
-		for dr in range(1, look_ahead + 1):
-			var r := current_row + dr
-			if r >= grid.size():
-				break
-			if c < grid[r].size() and grid[r][c] > 0:
-				var h: int = grid[r][c]
-				if prev_h > 0 and h > prev_h:
-					# Wall crash risk — catastrophic if close
-					if dr <= 6:
-						score -= 10.0
-					else:
-						score -= 3.0
-				else:
-					score += 1.0 / (1.0 + float(dr) * 0.05)
-				prev_h = h
-			else:
-				if dr <= 4:
-					score -= 6.0
-				else:
-					score -= 0.5
-
-		# Prefer columns closer to current position
-		score -= absf(float(c) - col_f) * 1.2
-
-		# If airborne, don't steer into columns with floor above ship
-		if airborne and c != current_col:
-			for dr in range(0, 4):
-				var r := current_row + dr
-				if r >= 0 and r < grid.size() and c < grid[r].size() and grid[r][c] > 0:
-					var top := float(grid[r][c]) * tile_h
-					if top > pos.y - 0.3:
-						score -= 20.0
-						break
-
-		if score > best_score:
-			best_score = score
-			best_col = c
-
-	# Steer toward best column
-	var target_x := float(best_col) * tile_size
-	var diff := target_x - pos.x
-	var steer := 0.0
-	if absf(diff) > 0.15:
-		steer = clampf(diff * 1.5, -1.0, 1.0)
-	# Dampen steering while airborne to avoid lateral wall crashes
-	if airborne:
-		steer *= 0.4
-
-	# Jump detection: check current column and best column
-	var need_jump := false
-	var check_col := clampi(roundi(col_f), 0, grid_cols - 1)
-	if is_on_floor() or _can_jump:
-		for dr in range(1, jump_look + 1):
-			var r := current_row + dr
-			if r >= grid.size() or check_col >= grid[r].size():
-				break
-			var ahead_h: int = grid[r][check_col]
-			if ahead_h == 0:
-				for dr2 in range(dr + 1, dr + 12):
-					var r2 := current_row + dr2
-					if r2 < grid.size() and check_col < grid[r2].size() and grid[r2][check_col] > 0:
-						need_jump = true
-						break
-				if need_jump:
-					break
-			elif current_h > 0 and ahead_h > current_h:
-				need_jump = true
-				break
-		if not need_jump and best_col != check_col:
-			for dr in range(1, jump_look + 1):
-				var r := current_row + dr
-				if r >= grid.size() or best_col >= grid[r].size():
-					break
-				var ahead_h: int = grid[r][best_col]
-				if ahead_h == 0:
-					for dr2 in range(dr + 1, dr + 12):
-						var r2 := current_row + dr2
-						if r2 < grid.size() and best_col < grid[r2].size() and grid[r2][best_col] > 0:
-							need_jump = true
-							break
-					if need_jump:
-						break
-				elif current_h > 0 and ahead_h > current_h:
-					need_jump = true
-					break
-
-	# Speed: full throttle, brake for narrow/tricky or big lateral moves
-	var target_speed := max_speed
-	var narrow_count := 0
-	for dr in [3, 5, 8]:
-		var cr: int = current_row + dr
-		if cr >= 0 and cr < grid.size():
-			var floor_count := 0
-			for c in grid_cols:
-				if c < grid[cr].size() and grid[cr][c] > 0:
-					floor_count += 1
-			if floor_count <= 1:
-				narrow_count += 2
-			elif floor_count <= 2:
-				narrow_count += 1
-	if narrow_count >= 4:
-		target_speed = 16.0
-	elif narrow_count >= 2:
-		target_speed = 22.0
-	if absf(diff) > tile_size * 3:
-		target_speed = minf(target_speed, 18.0)
-	# Brake when approaching height changes
-	if need_jump:
-		target_speed = minf(target_speed, 22.0)
-
-	# Tunnel overrides — highest priority
-	if in_tunnel and tunnel_col_now >= 0:
-		# Precise centering on tunnel column, tight steering
-		var t_target := float(tunnel_col_now) * tile_size
-		var t_diff := t_target - pos.x
-		steer = clampf(t_diff * 3.0, -1.0, 1.0)
-		need_jump = false  # Can't jump in tunnels (roof)
-		target_speed = minf(target_speed, 15.0)
-	elif tunnel_ahead_col >= 0 and tunnel_ahead_dist <= 12:
-		# Pre-align to tunnel column before entering
-		var t_target := float(tunnel_ahead_col) * tile_size
-		var t_diff := t_target - pos.x
-		steer = clampf(t_diff * 2.0, -1.0, 1.0)
-		if tunnel_ahead_dist <= 5:
-			target_speed = minf(target_speed, 14.0)
-		else:
-			target_speed = minf(target_speed, 20.0)
-
-	return {"dir": steer, "target_speed": target_speed, "jump": need_jump}
+	return Autopilot.compute(game._grid, game._tunnels, game._cols,
+		global_position, current_speed, max_speed, lateral_speed,
+		is_on_floor(), _can_jump, _vertical_velocity,
+		2.0 * jump_velocity / gravity)

@@ -1,23 +1,22 @@
 # Static completability check for GENERATED tracks: builds 320 tracks
 # (80 per theme) with maxed-out difficulty params and asserts the invariants
-# the generator constraints guarantee: every row transition has a climbable
-# column path, gaps fit the run-up/air-time budget, gap landings are at or
-# below takeoff height.
+# the generator guarantees: every row transition has a climbable column path,
+# gaps fit the run-up/air-time budget, gap landings are at or below takeoff
+# height, and tunnel bores are flat, gap-free and enterable without a jump.
 #
-# The limit formulas here MIRROR LevelGenerator.chunk_begin() - keep in sync.
+# Limits come from LevelGenerator.jump_limits() / _max_gap_rows() - the same
+# formulas the generator itself uses - and the ship performance constants are
+# asserted against ship.gd's export defaults, so drift fails loudly here.
 #
 # Run:  godot --headless --path . -s tests/gen_constraints.gd
 # Pass: "checked 320 tracks, 0 violations", exit code 0.
 extends SceneTree
 
 func _initialize():
-	var failures := 0
+	var failures := _check_ship_constants()
 	var tracks := 0
 	for theme in 4:
-		var grav: float = LevelGenerator.GROUP_GRAVITY[theme]
-		var jv: float = LevelGenerator.GROUP_JUMP_VELOCITY[theme]
-		var max_step := maxi(1, int(jv * jv / (2.0 * grav) * 0.85 / 0.5))
-		var air_time := 2.0 * jv / grav
+		var lim: Dictionary = LevelGenerator.jump_limits(theme)
 		for trial in 80:
 			var p := {
 				"seed": theme * 1000 + trial, "length": 400,
@@ -28,24 +27,51 @@ func _initialize():
 				"theme": theme,
 			}
 			tracks += 1
-			failures += _check(LevelGenerator.generate(p), max_step, air_time, theme, trial)
+			failures += _check(LevelGenerator.generate(p), lim, theme, trial)
 	print("checked %d tracks, %d violations" % [tracks, failures])
 	quit(1 if failures > 0 else 0)
 
-func _check(content: String, max_step: int, air_time: float, theme: int, trial: int) -> int:
+func _check_ship_constants() -> int:
+	var script: GDScript = load("res://Scripts/ship.gd")
+	if script == null or not script.can_instantiate():
+		printerr("ship.gd failed to load/parse - cannot verify ship constants")
+		return 1
+	var ship = script.new()
+	var bad := 0
+	if ship.acceleration != LevelGenerator.SHIP_ACCEL:
+		printerr("ship.gd acceleration %s != LevelGenerator.SHIP_ACCEL %s" % [ship.acceleration, LevelGenerator.SHIP_ACCEL])
+		bad += 1
+	if ship.max_speed != LevelGenerator.SHIP_MAX_SPEED:
+		printerr("ship.gd max_speed %s != LevelGenerator.SHIP_MAX_SPEED %s" % [ship.max_speed, LevelGenerator.SHIP_MAX_SPEED])
+		bad += 1
+	if ship.lateral_speed != LevelGenerator.SHIP_LATERAL_SPEED:
+		printerr("ship.gd lateral_speed %s != LevelGenerator.SHIP_LATERAL_SPEED %s" % [ship.lateral_speed, LevelGenerator.SHIP_LATERAL_SPEED])
+		bad += 1
+	ship.free()
+	return bad
+
+func _check(content: String, lim: Dictionary, theme: int, trial: int) -> int:
 	var grid: Array = []
+	var tun: Array = []
 	for line in content.split("\n"):
 		if line.strip_edges() == "":
 			continue
 		var row: Array[int] = []
 		row.resize(10)
 		row.fill(0)
+		var trow: Array[bool] = []
+		trow.resize(10)
+		trow.fill(false)
 		for ci in range(0, mini(line.length(), 20), 2):
 			var ch := line[ci]
 			if ch >= "1" and ch <= "9":
 				row[ci / 2] = ch.unicode_at(0) - "0".unicode_at(0)
+			if ci + 1 < line.length() and (line[ci + 1] == "T" or line[ci + 1] == "t"):
+				trow[ci / 2] = true
 		grid.append(row)
+		tun.append(trow)
 
+	var max_step: int = lim.max_step
 	var bad := 0
 	var rows := grid.size()
 	var r := 0
@@ -66,8 +92,7 @@ func _check(content: String, max_step: int, air_time: float, theme: int, trial: 
 			while gr < rows and _empty(grid[gr]):
 				gl += 1
 				gr += 1
-			var v := minf(30.0, sqrt(2.0 * 12.0 * float(runup) * 2.0))
-			var max_gap := maxi(1, int(v * air_time / 2.0) - 1)
+			var max_gap: int = LevelGenerator._max_gap_rows(runup, lim)
 			if gl > max_gap:
 				print("  theme %d trial %d row %d: gap %d > max %d (runup %d)" % [theme, trial, r, gl, max_gap, runup])
 				bad += 1
@@ -80,6 +105,22 @@ func _check(content: String, max_step: int, air_time: float, theme: int, trial: 
 			print("  theme %d trial %d row %d: wall with no climbable column (step > %d)" % [theme, trial, r, max_step])
 			bad += 1
 		r += 1
+
+	# Tunnel invariants: no jumping under the roof, so a bore must be flat,
+	# gap-free and entered at floor level
+	for tr in rows:
+		for c in 10:
+			if not tun[tr][c]:
+				continue
+			if grid[tr][c] == 0:
+				print("  theme %d trial %d row %d col %d: gap inside tunnel" % [theme, trial, tr, c])
+				bad += 1
+			elif tr + 1 < rows and tun[tr + 1][c] and grid[tr + 1][c] != grid[tr][c]:
+				print("  theme %d trial %d row %d col %d: height step inside tunnel" % [theme, trial, tr, c])
+				bad += 1
+			elif tr > 0 and not tun[tr - 1][c] and grid[tr - 1][c] != grid[tr][c]:
+				print("  theme %d trial %d row %d col %d: tunnel entry needs a jump" % [theme, trial, tr, c])
+				bad += 1
 	return bad
 
 func _empty(row: Array) -> bool:

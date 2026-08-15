@@ -8,9 +8,9 @@ const TRACKS: Array[AudioStream] = [
 	preload("res://Music/dark.ogg"),
 ]
 
+var enabled := false
+var current_group := -1
 var _player: AudioStreamPlayer
-var _enabled := false
-var _current_group := -1
 
 func _ready():
 	for track in TRACKS:
@@ -25,20 +25,20 @@ func _input(event):
 			toggle()
 
 func toggle():
-	_enabled = not _enabled
-	if _enabled:
-		if _current_group >= 0:
+	enabled = not enabled
+	if enabled:
+		if current_group >= 0:
 			_start_playback()
 	else:
 		_player.stop()
 
 func play_for_group(group: int):
-	if group == _current_group:
+	if group == current_group:
 		return
-	_current_group = group
-	if _enabled:
+	current_group = group
+	if enabled:
 		_start_playback()
 
 func _start_playback():
-	_player.stream = TRACKS[clampi(_current_group, 0, TRACKS.size() - 1)]
+	_player.stream = TRACKS[clampi(current_group, 0, TRACKS.size() - 1)]
 	_player.play()
