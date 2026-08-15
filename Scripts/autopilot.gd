@@ -10,10 +10,10 @@ const TILE_HEIGHT := 0.5
 
 static func compute(grid: Array, tunnels: Array, cols: int, pos: Vector3,
 		speed: float, max_speed: float, lateral_speed: float, on_floor: bool,
-		can_jump: bool, vert_vel: float, air_time: float) -> Dictionary:
+		can_jump: bool, vert_vel: float, air_time: float, row_base := 0) -> Dictionary:
 	if grid.is_empty():
 		return {"dir": 0.0, "target_speed": max_speed, "jump": false}
-	var current_row := int(-pos.z / TILE_SIZE)
+	var current_row := int(-pos.z / TILE_SIZE) - row_base
 	var col_f := pos.x / TILE_SIZE
 	var current_col := clampi(roundi(col_f), 0, cols - 1)
 	if current_row < 0 or current_row >= grid.size():

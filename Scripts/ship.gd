@@ -511,4 +511,4 @@ func _compute_autopilot() -> Dictionary:
 	return Autopilot.compute(game._grid, game._tunnels, game._cols,
 		global_position, current_speed, max_speed, lateral_speed,
 		is_on_floor(), _can_jump, _vertical_velocity,
-		2.0 * jump_velocity / gravity)
+		2.0 * jump_velocity / gravity, game._row_base)

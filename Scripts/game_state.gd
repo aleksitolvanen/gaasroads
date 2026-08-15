@@ -26,59 +26,9 @@ var run_records := false
 var save_path := "user://completed.cfg"
 var _completed: Dictionary = {}
 var _best_times: Dictionary = {}
-var _status_label: Label
-var _status_init := false
-var _s_music := false
-var _s_sfx := true
-var _s_mode := false
-var _s_ap := false
 
 func _ready():
 	_load()
-	_build_status_overlay()
-
-func _process(_delta):
-	if _status_label == null:
-		return
-	# Rebuild the status line only when a flag actually changed
-	if _status_init and Music.enabled == _s_music and sfx_enabled == _s_sfx \
-			and classical_mode == _s_mode and autopilot == _s_ap:
-		return
-	_status_init = true
-	_s_music = Music.enabled
-	_s_sfx = sfx_enabled
-	_s_mode = classical_mode
-	_s_ap = autopilot
-	var music_str := "ON" if _s_music else "OFF"
-	var sfx_str := "ON" if _s_sfx else "OFF"
-	var mode_str := "Classical" if _s_mode else "Normal"
-	var ap_str := " | AUTOPILOT" if _s_ap else ""
-	_status_label.text = "Music: %s | Sounds: %s | Mode: %s%s" % [music_str, sfx_str, mode_str, ap_str]
-
-func _input(event):
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_N:
-			sfx_enabled = not sfx_enabled
-		elif event.keycode == KEY_B:
-			classical_mode = not classical_mode
-		elif event.keycode == KEY_P:
-			autopilot = not autopilot
-
-func _build_status_overlay():
-	var layer := CanvasLayer.new()
-	layer.layer = 100
-	add_child(layer)
-	_status_label = Label.new()
-	_status_label.anchor_left = 1
-	_status_label.anchor_right = 1
-	_status_label.anchor_top = 1
-	_status_label.anchor_bottom = 1
-	_status_label.offset_left = -420
-	_status_label.offset_top = -24
-	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_status_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.55, 0.7))
-	_status_label.add_theme_font_size_override("font_size", 11)
-	layer.add_child(_status_label)
 
 func is_completed(group: int, track: int) -> bool:
 	return _completed.get("%d_%d" % [group, track], false)

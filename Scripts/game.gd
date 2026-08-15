@@ -45,6 +45,9 @@ var _share_open := false
 var _level_content := ""
 var _grid: Array[Array] = []
 var _tunnels: Array[Array] = []
+# Endless mode trims passed rows off _grid/_tunnels; _row_base is the
+# absolute row index of _grid[0]
+var _row_base := 0
 var _cols := 10
 var _build_queue: Array = []
 var _build_next := 0
@@ -143,7 +146,7 @@ func _process(delta):
 			params["seed"] = randi()
 			params["length"] = 200
 			# endless ramps up with distance survived
-			params["diff_boost"] = clampf(float(_grid.size()) / 2500.0, 0.0, 0.3)
+			params["diff_boost"] = clampf(float(_row_base + _grid.size()) / 2500.0, 0.0, 0.3)
 			_chunk_state = LevelGenerator.chunk_begin(params)
 		_cleanup_tick += 1
 		if _cleanup_tick >= 30:
@@ -538,19 +541,26 @@ func _create_nebula_background():
 		ring_light.shadow_enabled = false
 		ring_root.add_child(ring_light)
 
-		# Dust particles scattered around the ring
+		# Dust particles scattered around the ring - one MultiMesh per ring,
+		# same pattern as the star field (per-node quads cost a draw each)
 		var dust_count := rng.randi_range(12, 25)
-		for _j in dust_count:
+		var dm := QuadMesh.new()
+		dm.size = Vector2(1, 1)
+		dm.material = dust_mat
+		var dust_mm := MultiMesh.new()
+		dust_mm.transform_format = MultiMesh.TRANSFORM_3D
+		dust_mm.mesh = dm
+		dust_mm.instance_count = dust_count
+		for j in dust_count:
 			var angle := rng.randf() * TAU
 			var r := rng.randf_range(inner * 0.7, outer * 1.1)
-			var dust := MeshInstance3D.new()
-			var dm := QuadMesh.new()
 			var ds := rng.randf_range(0.3, 0.8)
-			dm.size = Vector2(ds, ds)
-			dm.material = dust_mat
-			dust.mesh = dm
-			dust.position = Vector3(cos(angle) * r, sin(angle) * r, rng.randf_range(-2, 2))
-			ring_root.add_child(dust)
+			var t := Transform3D.IDENTITY.scaled(Vector3(ds, ds, ds))
+			t.origin = Vector3(cos(angle) * r, sin(angle) * r, rng.randf_range(-2, 2))
+			dust_mm.set_instance_transform(j, t)
+		var dust := MultiMeshInstance3D.new()
+		dust.multimesh = dust_mm
+		ring_root.add_child(dust)
 
 func _create_solar_background():
 	# Scattered dim stars
@@ -801,38 +811,26 @@ func _create_dark_matter_background():
 	fighter_glow.emission = Color(0.2, 0.7, 0.3)
 	fighter_glow.emission_energy_multiplier = 3.0
 
-	# Create a small fighter: body + two prongs + engine glow
+	# A small fighter: body + two prongs + engine glow, baked once and
+	# shared by all 8 instances
+	var fbody_mesh := BoxMesh.new()
+	fbody_mesh.size = Vector3(1.5, 0.6, 3.0)
+	var prong_m := BoxMesh.new()
+	prong_m.size = Vector3(0.4, 0.3, 2.0)
+	var feng_mesh := BoxMesh.new()
+	feng_mesh.size = Vector3(0.8, 0.3, 0.3)
+	var fighter_mesh := _bake_mesh([
+		[fighter_mat, [
+			[fbody_mesh, _at(Vector3.ZERO)],
+			[prong_m, _at(Vector3(-1.2, 0, -0.8))],
+			[prong_m, _at(Vector3(1.2, 0, -0.8))],
+		]],
+		[fighter_glow, [[feng_mesh, _at(Vector3(0, 0, 1.6))]]],
+	])
+
 	for i in 8:
-		var fighter := Node3D.new()
-
-		var fbody := MeshInstance3D.new()
-		var fbody_mesh := BoxMesh.new()
-		fbody_mesh.size = Vector3(1.5, 0.6, 3.0)
-		fbody_mesh.material = fighter_mat
-		fbody.mesh = fbody_mesh
-		fighter.add_child(fbody)
-
-		var lprong := MeshInstance3D.new()
-		var prong_m := BoxMesh.new()
-		prong_m.size = Vector3(0.4, 0.3, 2.0)
-		prong_m.material = fighter_mat
-		lprong.mesh = prong_m
-		lprong.position = Vector3(-1.2, 0, -0.8)
-		fighter.add_child(lprong)
-
-		var rprong := MeshInstance3D.new()
-		rprong.mesh = prong_m
-		rprong.position = Vector3(1.2, 0, -0.8)
-		fighter.add_child(rprong)
-
-		var feng := MeshInstance3D.new()
-		var feng_mesh := BoxMesh.new()
-		feng_mesh.size = Vector3(0.8, 0.3, 0.3)
-		feng_mesh.material = fighter_glow
-		feng.mesh = feng_mesh
-		feng.position = Vector3(0, 0, 1.6)
-		fighter.add_child(feng)
-
+		var fighter := MeshInstance3D.new()
+		fighter.mesh = fighter_mesh
 		add_child(fighter)
 		_fighters.append(fighter)
 
@@ -847,95 +845,82 @@ func _create_dark_matter_background():
 				rng.randf_range(-10, 10), rng.randf_range(-30, 30), rng.randf_range(-5, 5)
 			)
 
+# Bakes [mesh, transform] part lists into one ArrayMesh, one surface per
+# material group - the GL Compatibility renderer has no batching, so static
+# background props must merge their pieces to keep draw calls down.
+func _bake_mesh(groups: Array) -> ArrayMesh:
+	var mesh: ArrayMesh = null
+	for g in groups:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for p in g[1]:
+			st.append_from(p[0], 0, p[1])
+		st.set_material(g[0])
+		mesh = st.commit(mesh)
+	return mesh
+
+func _at(pos: Vector3, rot_deg := Vector3.ZERO) -> Transform3D:
+	return Transform3D(Basis.from_euler(rot_deg * (PI / 180.0)), pos)
+
 func _build_mothership(ship_root: Node3D, hull_mat: StandardMaterial3D, glow_mat: StandardMaterial3D, red_glow_mat: StandardMaterial3D, rng: RandomNumberGenerator):
-	var hull := MeshInstance3D.new()
 	var hull_mesh := CylinderMesh.new()
 	hull_mesh.top_radius = 25.0
 	hull_mesh.bottom_radius = 28.0
 	hull_mesh.height = 6.0
-	hull_mesh.material = hull_mat
-	hull.mesh = hull_mesh
-	ship_root.add_child(hull)
 
-	var bridge := MeshInstance3D.new()
 	var bridge_mesh := CylinderMesh.new()
 	bridge_mesh.top_radius = 6.0
 	bridge_mesh.bottom_radius = 10.0
 	bridge_mesh.height = 10.0
-	bridge_mesh.material = hull_mat
-	bridge.mesh = bridge_mesh
-	bridge.position = Vector3(0, 8, 0)
-	ship_root.add_child(bridge)
 
-	var dome := MeshInstance3D.new()
 	var dome_mesh := SphereMesh.new()
 	dome_mesh.radius = 6.5
 	dome_mesh.height = 7.0
-	dome_mesh.material = hull_mat
-	dome.mesh = dome_mesh
-	dome.position = Vector3(0, 13, 0)
-	ship_root.add_child(dome)
 
 	var prong_mesh := BoxMesh.new()
 	prong_mesh.size = Vector3(3.0, 2.0, 35.0)
-	prong_mesh.material = hull_mat
-	var prong_l := MeshInstance3D.new()
-	prong_l.mesh = prong_mesh
-	prong_l.position = Vector3(-8, -1, -25)
-	ship_root.add_child(prong_l)
-	var prong_r := MeshInstance3D.new()
-	prong_r.mesh = prong_mesh
-	prong_r.position = Vector3(8, -1, -25)
-	ship_root.add_child(prong_r)
 
-	var engine_block := MeshInstance3D.new()
 	var engine_mesh := BoxMesh.new()
 	engine_mesh.size = Vector3(18.0, 5.0, 12.0)
-	engine_mesh.material = hull_mat
-	engine_block.mesh = engine_mesh
-	engine_block.position = Vector3(0, -1, 22)
-	ship_root.add_child(engine_block)
+
+	var hull_parts := [
+		[hull_mesh, _at(Vector3.ZERO)],
+		[bridge_mesh, _at(Vector3(0, 8, 0))],
+		[dome_mesh, _at(Vector3(0, 13, 0))],
+		[prong_mesh, _at(Vector3(-8, -1, -25))],
+		[prong_mesh, _at(Vector3(8, -1, -25))],
+		[engine_mesh, _at(Vector3(0, -1, 22))],
+	]
 
 	var strip_mesh := BoxMesh.new()
 	strip_mesh.size = Vector3(20.0, 0.3, 1.0)
-	strip_mesh.material = glow_mat
-	for z_off in [-10.0, -3.0, 4.0, 11.0]:
-		var strip := MeshInstance3D.new()
-		strip.mesh = strip_mesh
-		strip.position = Vector3(0, -3.2, z_off)
-		ship_root.add_child(strip)
 
 	var tip_mesh := BoxMesh.new()
 	tip_mesh.size = Vector3(2.0, 1.5, 2.0)
-	tip_mesh.material = glow_mat
-	var tip_l := MeshInstance3D.new()
-	tip_l.mesh = tip_mesh
-	tip_l.position = Vector3(-8, -1, -43)
-	ship_root.add_child(tip_l)
-	var tip_r := MeshInstance3D.new()
-	tip_r.mesh = tip_mesh
-	tip_r.position = Vector3(8, -1, -43)
-	ship_root.add_child(tip_r)
+
+	var window_mesh := BoxMesh.new()
+	window_mesh.size = Vector3(8.0, 1.5, 0.3)
+
+	var glow_parts := [
+		[tip_mesh, _at(Vector3(-8, -1, -43))],
+		[tip_mesh, _at(Vector3(8, -1, -43))],
+		[window_mesh, _at(Vector3(0, 12, -6.5))],
+	]
+	for z_off in [-10.0, -3.0, 4.0, 11.0]:
+		glow_parts.append([strip_mesh, _at(Vector3(0, -3.2, z_off))])
 
 	var engine_glow_mesh := CylinderMesh.new()
 	engine_glow_mesh.top_radius = 2.0
 	engine_glow_mesh.bottom_radius = 2.5
 	engine_glow_mesh.height = 1.5
-	engine_glow_mesh.material = red_glow_mat
-	for x_off in [-5.0, 0.0, 5.0]:
-		var eg := MeshInstance3D.new()
-		eg.mesh = engine_glow_mesh
-		eg.position = Vector3(x_off, -1, 28.5)
-		eg.rotation_degrees = Vector3(90, 0, 0)
-		ship_root.add_child(eg)
 
-	var window_mesh := BoxMesh.new()
-	window_mesh.size = Vector3(8.0, 1.5, 0.3)
-	window_mesh.material = glow_mat
-	var window := MeshInstance3D.new()
-	window.mesh = window_mesh
-	window.position = Vector3(0, 12, -6.5)
-	ship_root.add_child(window)
+	var red_parts := []
+	for x_off in [-5.0, 0.0, 5.0]:
+		red_parts.append([engine_glow_mesh, _at(Vector3(x_off, -1, 28.5), Vector3(90, 0, 0))])
+
+	var body := MeshInstance3D.new()
+	body.mesh = _bake_mesh([[hull_mat, hull_parts], [glow_mat, glow_parts], [red_glow_mat, red_parts]])
+	ship_root.add_child(body)
 
 	var aura_mat := StandardMaterial3D.new()
 	aura_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -976,75 +961,56 @@ func _build_mothership(ship_root: Node3D, hull_mat: StandardMaterial3D, glow_mat
 	orange_light_mat.emission = Color(1.0, 0.5, 0.05)
 	orange_light_mat.emission_energy_multiplier = 4.0
 
+	var ehull_mesh := CylinderMesh.new()
+	ehull_mesh.top_radius = 5.0
+	ehull_mesh.bottom_radius = 7.0
+	ehull_mesh.height = 2.0
+
+	var ebridge_mesh := CylinderMesh.new()
+	ebridge_mesh.top_radius = 1.5
+	ebridge_mesh.bottom_radius = 2.2
+	ebridge_mesh.height = 1.8
+
+	var spike_mesh := BoxMesh.new()
+	spike_mesh.size = Vector3(0.7, 0.5, 8.0)
+
+	var light_mesh := BoxMesh.new()
+	light_mesh.size = Vector3(0.6, 0.6, 0.6)
+
+	var lo_mesh := BoxMesh.new()
+	lo_mesh.size = Vector3(0.7, 0.4, 0.7)
+
+	var eeng_mesh := BoxMesh.new()
+	eeng_mesh.size = Vector3(2.5, 0.8, 0.8)
+
+	# All escorts share one baked mesh; only their root transform differs
+	var escort_mesh := _bake_mesh([
+		[escort_hull_mat, [
+			[ehull_mesh, _at(Vector3.ZERO)],
+			[ebridge_mesh, _at(Vector3(0, 1.8, 0))],
+			[spike_mesh, _at(Vector3(0, -0.3, -8.0))],
+		]],
+		[white_light_mat, [
+			[light_mesh, _at(Vector3(-6.5, 0, 0))],
+			[light_mesh, _at(Vector3(6.5, 0, 0))],
+		]],
+		[orange_light_mat, [
+			[lo_mesh, _at(Vector3(0, -1.2, 3.0))],
+			[lo_mesh, _at(Vector3(0, -1.2, -3.0))],
+		]],
+		[glow_mat, [[eeng_mesh, _at(Vector3(0, -0.2, 7.5))]]],
+	])
+
 	var escort_offsets := [
 		Vector3(-35, 5, 10), Vector3(40, -3, -5), Vector3(-15, 12, -20),
 		Vector3(50, 8, 15), Vector3(-45, -2, -10), Vector3(20, -6, 25),
 	]
 
 	for i in escort_offsets.size():
-		var escort := Node3D.new()
+		var escort := MeshInstance3D.new()
+		escort.mesh = escort_mesh
 		escort.position = escort_offsets[i]
 		escort.rotation_degrees = Vector3(rng.randf_range(-8, 8), rng.randf_range(-40, 40), rng.randf_range(-8, 8))
-
-		var ehull := MeshInstance3D.new()
-		var ehull_mesh := CylinderMesh.new()
-		ehull_mesh.top_radius = 5.0
-		ehull_mesh.bottom_radius = 7.0
-		ehull_mesh.height = 2.0
-		ehull_mesh.material = escort_hull_mat
-		ehull.mesh = ehull_mesh
-		escort.add_child(ehull)
-
-		var ebridge := MeshInstance3D.new()
-		var ebridge_mesh := CylinderMesh.new()
-		ebridge_mesh.top_radius = 1.5
-		ebridge_mesh.bottom_radius = 2.2
-		ebridge_mesh.height = 1.8
-		ebridge_mesh.material = escort_hull_mat
-		ebridge.mesh = ebridge_mesh
-		ebridge.position = Vector3(0, 1.8, 0)
-		escort.add_child(ebridge)
-
-		var spike := MeshInstance3D.new()
-		var spike_mesh := BoxMesh.new()
-		spike_mesh.size = Vector3(0.7, 0.5, 8.0)
-		spike_mesh.material = escort_hull_mat
-		spike.mesh = spike_mesh
-		spike.position = Vector3(0, -0.3, -8.0)
-		escort.add_child(spike)
-
-		var light_mesh := BoxMesh.new()
-		light_mesh.size = Vector3(0.6, 0.6, 0.6)
-		light_mesh.material = white_light_mat
-		var lw1 := MeshInstance3D.new()
-		lw1.mesh = light_mesh
-		lw1.position = Vector3(-6.5, 0, 0)
-		escort.add_child(lw1)
-		var lw2 := MeshInstance3D.new()
-		lw2.mesh = light_mesh
-		lw2.position = Vector3(6.5, 0, 0)
-		escort.add_child(lw2)
-
-		var lo_mesh := BoxMesh.new()
-		lo_mesh.size = Vector3(0.7, 0.4, 0.7)
-		lo_mesh.material = orange_light_mat
-		var lo1 := MeshInstance3D.new()
-		lo1.mesh = lo_mesh
-		lo1.position = Vector3(0, -1.2, 3.0)
-		escort.add_child(lo1)
-		var lo2 := MeshInstance3D.new()
-		lo2.mesh = lo_mesh
-		lo2.position = Vector3(0, -1.2, -3.0)
-		escort.add_child(lo2)
-
-		var eeng := MeshInstance3D.new()
-		var eeng_mesh := BoxMesh.new()
-		eeng_mesh.size = Vector3(2.5, 0.8, 0.8)
-		eeng_mesh.material = glow_mat
-		eeng.mesh = eeng_mesh
-		eeng.position = Vector3(0, -0.2, 7.5)
-		escort.add_child(eeng)
-
 		ship_root.add_child(escort)
 
 		# Slow drift animation
@@ -1158,6 +1124,7 @@ func _start_track(content: String):
 		child.queue_free()
 	_grid = []
 	_tunnels = []
+	_row_base = 0
 	_build_queue.clear()
 	_build_next = 0
 	_spawned_track.clear()
@@ -1192,7 +1159,7 @@ func _start_track(content: String):
 	_enqueue_rows(lines)
 
 func _enqueue_rows(lines: PackedStringArray):
-	var row_offset := _grid.size()
+	var row_offset := _row_base + _grid.size()
 	var rows := lines.size()
 
 	var grid: Array[Array] = []
@@ -1222,7 +1189,7 @@ func _enqueue_rows(lines: PackedStringArray):
 		_grid.append(floor_row)
 		_tunnels.append(tunnel_row)
 
-	_level_end_z = -(_grid.size() - 1) * TILE_SIZE
+	_level_end_z = -(_row_base + _grid.size() - 1) * TILE_SIZE
 
 	# Greedy-merge floor tiles within this block into build jobs
 	var used: Array[Array] = []
@@ -1535,6 +1502,14 @@ func _free_passed_track(ship_z: float):
 	_spawned_track = keep
 	if freed > 0:
 		PerfMonitor.mark("freed %d" % freed)
+	# Drop the parsed rows behind the ship too - nothing reads them again
+	# (the autopilot only looks forward), and an endless run otherwise grows
+	# _grid/_tunnels without bound
+	var passed := int(-ship_z / TILE_SIZE) - 30 - _row_base
+	if passed > 0:
+		_grid = _grid.slice(passed)
+		_tunnels = _tunnels.slice(passed)
+		_row_base += passed
 
 func _create_shader_warmup():
 	# Draws every shader variant behind the GET READY gate so nothing compiles

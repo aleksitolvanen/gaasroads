@@ -21,6 +21,7 @@ GameState="*res://Scripts/game_state.gd"
 Music="*res://Scripts/music.gd"
 PerfMonitor="*res://Scripts/perf_monitor.gd"
 ShaderWarmup="*res://Scripts/shader_warmup.gd"
+StatusOverlay="*res://Scripts/status_overlay.gd"
 
 [dotnet]
 

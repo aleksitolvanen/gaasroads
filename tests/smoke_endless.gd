@@ -64,6 +64,7 @@ func _process(_delta) -> bool:
 				# passed should still be tracked (60u covers the tick lag)
 				for entry in game._spawned_track:
 					assert(entry[1] <= game._ship.global_position.z + 60.0, "passed track not freed behind the ship")
+				assert(game._row_base > 0, "passed grid rows should be trimmed in endless mode")
 				game._ship.start_explosion()
 				_deadline = Time.get_ticks_msec() + 10000
 				_phase = 3
@@ -76,6 +77,7 @@ func _process(_delta) -> bool:
 				return false
 			print("fresh track: grid=%d, ship z=%.1f, end_z=%.0f, tracked=%d, nodes=%d, chunk_empty=%s" % [game._grid.size(), game._ship.global_position.z, game._level_end_z, game._spawned_track.size(), game.get_node("Level").get_child_count(), str(game._chunk_state.is_empty())])
 			assert(game._grid.size() < _grid_after_ready + 100, "grid should be fresh after endless reset")
+			assert(game._row_base == 0, "row base should reset with the fresh track")
 			assert(absf(game._ship.global_position.z) < 30.0, "ship not back at start")
 			assert(not game._ship.frozen, "ship still frozen")
 			print("ENDLESS SMOKE OK")

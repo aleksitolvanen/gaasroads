@@ -87,6 +87,7 @@ Flags:
 | `--exploits` | allow the banked air-jump (pre-fix shipped physics; the game now expires it with the coyote window) |
 | `--normal` | simulate normal mode (free air steering) instead of classical |
 | `--tape F` | write the winning input tape (`W/S` + `A/D` + `J` per line) |
+| `--dump-trace F` | write the winning tape's per-entry trajectory (reference for the tape-replay harness) |
 
 Expected: all 15 authored levels report `COMPLETABLE` within seconds.
 
@@ -134,7 +135,7 @@ movement-tech snapshot (run with `--normal`):
 | Level | Classical | Normal | Why |
 |---|---|---|---|
 | wall_h4 | COMPLETABLE | COMPLETABLE | 1.5u step, apex crossing at low speed |
-| wall_h5 | LIKELY NOT | COMPLETABLE | 2.0u step needs bounce + steered coyote jump |
+| wall_h5 | COMPLETABLE | COMPLETABLE | 2.0u step: bounce + coyote jump (classical since the full-impact bounce model) |
 | gap_20 | LIKELY NOT | LIKELY NOT | 40u gap, beyond all tech in either mode |
 | pogo | COMPLETABLE | COMPLETABLE | 1-row pad between gaps, straight bounce chain |
 | lateral_ok | COMPLETABLE | COMPLETABLE | committed drift covers it |
@@ -142,12 +143,30 @@ movement-tech snapshot (run with `--normal`):
 | zigzag | COMPLETABLE | COMPLETABLE | corner-to-corner tiles are drivable slowly |
 | tunnel_ok | COMPLETABLE | COMPLETABLE | positive control: forced flat tunnel |
 | tunnel_climb | LIKELY NOT | LIKELY NOT | height step inside a tunnel; no jumping under the roof |
-| speed_tight | LIKELY NOT | COMPLETABLE | normal-only bounce-touch chaining |
+| speed_tight | COMPLETABLE | COMPLETABLE | bounce-touch chaining (classical since the full-impact bounce model) |
 | speed_ok | COMPLETABLE | COMPLETABLE | run-up sized for the jump |
 | bounce_gate | LIKELY NOT | COMPLETABLE | normal needs `--stall 5000000 --budget 600`; coyote-delay tech |
 
 If a verdict here changes after a mechanics tweak, that is the point — the
 table is a movement-tech regression snapshot, not a pass/fail suite.
+
+### 8. Tape replay — `tests/test_tape_replay.gd`
+
+The executable guard on the solver's physics port: feeds a solver-produced
+input tape to the real ship and requires the engine trajectory to match the
+solver's own predicted trace for the opening 50 entries (runway, first
+bounces, first jumps) within a few centimetres. Any rule-level drift between
+`solve_level.py` and `ship.gd` — a constant, the coyote window, the bounce
+rule — desyncs the trace within a few entries and fails loudly.
+
+    python solve_level.py Levels/nebula_1.txt --tape tests/tapes/nebula_1.tape --dump-trace tests/tapes/nebula_1.ref
+    godot --headless --path . -s tests/test_tape_replay.gd -- Levels/nebula_1.txt tests/tapes/nebula_1.tape tests/tapes/nebula_1.ref
+
+Pass: `TAPE REPLAY OK`, exit code 0. Run at least one level per group after
+any physics change (non-default `--k` goes as a fourth argument). Full-tape
+survival is deliberately not required: engine contact resolution differs
+from the analytic port by millimetres per touch, which accumulates into
+open-loop desync deep into a level — expected, and not what this guards.
 
 ## When game mechanics change
 
@@ -173,9 +192,11 @@ Then, in order:
 2. `python solve_level.py` — all authored levels still completable. If one
    fails, the report names the row where every path dies; fix the level or
    the physics.
-3. `python tests/make_adversarial.py` + spot-check the table above — shows
+3. Tape replay (step 8), one level per group — proves the solver's port
+   still matches the engine, not just itself.
+4. `python tests/make_adversarial.py` + spot-check the table above — shows
    what the new movement tech allows; update the table.
-4. The smokes, for general breakage.
+5. The smokes, for general breakage.
 
 The solver's `tick()` is ~100 lines and is the ground-truth mirror of
 `ship.gd::_physics_process` — when in doubt, diff those two side by side.

@@ -69,7 +69,7 @@ def load_level(path):
     return tops, tun
 
 
-def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=True, stall_limit=400_000, classical=True):
+def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=True, stall_limit=400_000, classical=True, trace_path=None):
     rows = len(tops)
     goal_u = (rows - 1) * 2.0
     ncols = 10
@@ -121,20 +121,31 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
             latv = eff
         bottom = y - HALF_H
 
-        # support under current position
+        # support under current position; the full SNAP window mirrors the
+        # game's floor snap, which only acts while GROUNDED (vy == 0 here).
+        # Airborne motion is ballistic until real contact - the crossing
+        # branch below stops the fall exactly at the face - or bounces fire
+        # a tick early and hop landings snap down from the apex
+        snap_w = SNAP if vy == 0.0 else 0.001
         r0, r1 = rows_at(u)
         c0, c1 = cols_at(x)
         top = -1.0
         for r in range(r0, r1 + 1):
             for c in range(c0, c1 + 1):
                 t = tops[r][c]
-                if t > 0.0 and bottom - SNAP <= t <= bottom + WALL_EPS and t > top:
+                if t > 0.0 and bottom - snap_w <= t <= bottom + WALL_EPS and t > top:
                     top = t
         onf = top >= 0.0 and vy <= 0.0
         if onf:
             y = top + HALF_H
             lfy = y
-            vy = 0.0
+            # Landing impacts bounce, exactly like ship.gd's floor branch
+            # (the crossing tick below only stops the fall; the response
+            # lands here on the next tick, mirroring move_and_slide)
+            if vy < -1.0:
+                vy = -vy * BOUNCE
+            else:
+                vy = 0.0
             cj = True
             ja = False
         else:
@@ -211,7 +222,10 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
                             ny = cap
                             vy = 0.0
 
-        # landing
+        # landing: contact just stops the fall at the floor face - the
+        # bounce/at-rest response, can_jump and steering unlock all happen
+        # on the NEXT tick's floor branch above, the same two-frame split
+        # the game has (move_and_slide stops, next _physics_process reacts)
         if vy < 0.0:
             land = -1.0
             for r in range(nr0, nr1 + 1):
@@ -221,15 +235,6 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
                         land = t
             if land >= 0.0:
                 ny = land + HALF_H
-                if vy < -1.0:
-                    vy = -vy * BOUNCE
-                else:
-                    vy = 0.0
-                cj = True
-                lfy = ny
-                # contact unlocks steering (the game clears _jump_airborne on
-                # its is_on_floor frame, including the bounce branch)
-                ja = False
 
         # Below every possible floor top (min 0.5) minus snap: can never land
         if vy < 0.0 and ny - HALF_H < 0.5 - SNAP:
@@ -298,6 +303,23 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
                     walk, i = parents[walk]
                     tape.append(i)
                 tape.reverse()
+                if trace_path:
+                    # Re-run the winning tape through tick() and dump the
+                    # per-entry trajectory - reference data for the engine
+                    # replay harness (tests/test_tape_replay.gd)
+                    lines = []
+                    ts = start
+                    for ei, ti in enumerate(tape):
+                        lines.append("%d %.3f %.3f %.3f %.3f %.3f"
+                                     % (ei, -ts[0], ts[1], ts[2], ts[3], ts[4]))
+                        thr, lat, jmp = INPUTS[ti]
+                        for _ in range(k):
+                            ts, tdead, tdone = tick(ts, thr, lat, jmp)
+                            if ts is None or tdone:
+                                break
+                        if ts is None:
+                            break
+                    Path(trace_path).write_text("\n".join(lines) + "\n")
                 return "COMPLETABLE", cur[0], states, tape
             heapq.heappush(heap, (-cur[0], ticks + k, nkey, cur))
             fifo.append((nkey, cur, ticks + k))
@@ -312,6 +334,8 @@ def main():
     ap.add_argument("--budget", type=float, default=60.0)
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--tape", default=None)
+    ap.add_argument("--dump-trace", default=None,
+                    help="write the winning tape's per-entry trajectory (debug aid for tape replay)")
     ap.add_argument("--exploits", action="store_true",
                     help="allow banked air-jumps (pre-fix shipped physics)")
     ap.add_argument("--normal", action="store_true",
@@ -339,7 +363,7 @@ def main():
         verdict, u, states, tape = solve(
             tops, tun, GROUP_GRAVITY[theme], GROUP_JUMP[theme], args.budget,
             args.k, strict=not args.exploits, stall_limit=args.stall,
-            classical=not args.normal
+            classical=not args.normal, trace_path=args.dump_trace
         )
         dt = time.monotonic() - t0
         row = u / 2.0 - 24  # file-relative row reached
