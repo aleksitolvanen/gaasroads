@@ -40,9 +40,9 @@ WALL_EPS = 0.05
 TUNNEL_OPEN = 0.55   # max |x - tunnel center| to fit through the arch
 TUNNEL_CEIL = 1.1
 
-GROUP_GRAVITY = [20.0, 20.0, 12.0, 8.0, 16.0, 24.0, 7.0]
-GROUP_JUMP = [8.0, 8.0, 10.0, 7.8, 8.5, 9.5, 7.0]
-THEMES = {"cosmic": 0, "nebula": 1, "solar": 2, "dark": 3, "grid": 4, "wreck": 5, "bloom": 6}
+GROUP_GRAVITY = [20.0, 20.0, 12.0, 8.0, 16.0, 24.0, 7.0, 14.0]
+GROUP_JUMP = [8.0, 8.0, 10.0, 7.8, 8.5, 9.5, 7.0, 9.0]
+THEMES = {"cosmic": 0, "nebula": 1, "solar": 2, "dark": 3, "grid": 4, "wreck": 5, "bloom": 6, "wormhole": 7}
 
 # thr, lat, jump
 INPUTS = [(t, l, j) for t in (1, 0, -1) for l in (0, -1, 1) for j in (False, True)]

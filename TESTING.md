@@ -89,7 +89,7 @@ Flags:
 | `--tape F` | write the winning input tape (`W/S` + `A/D` + `J` per line) |
 | `--dump-trace F` | write the winning tape's per-entry trajectory (reference for the tape-replay harness) |
 
-Expected: all 18 authored levels report `COMPLETABLE` within seconds.
+Expected: all 19 authored levels report `COMPLETABLE` within seconds.
 
 **Caveats**: routes that need deep movement tech (bounce chains, coyote-delay
 jumps) can hide behind millions of states — before trusting a "no" on a

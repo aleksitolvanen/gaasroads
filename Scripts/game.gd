@@ -29,6 +29,14 @@ var _speed_label: Label
 var _hud_canvas: CanvasLayer
 var _level_end_z := -1000.0
 var _env_end_z := -1000.0
+# Wormhole theme: every tunnel transit flashes and re-tints the world
+const WORM_PALETTE := [
+	Color(0.7, 0.4, 1.0), Color(0.3, 0.9, 1.0), Color(1.0, 0.75, 0.35),
+	Color(0.4, 1.0, 0.6), Color(1.0, 0.4, 0.7),
+]
+var _in_portal := false
+var _portal_hops := 0
+var _wormhole_fill: DirectionalLight3D
 var _finishing := false
 var _laser_timer := 0.0
 var _laser_rng := RandomNumberGenerator.new()
@@ -152,6 +160,16 @@ func _process(delta):
 		if _cleanup_tick >= 30:
 			_cleanup_tick = 0
 			_free_passed_track(ship_pos.z)
+
+	# Wormhole: crossing a bore is a portal transit - flash on both mouths,
+	# and each exit re-tints the world so you come out "somewhere else"
+	if GameState.selected_group == 7 and _level_ready and not _finishing:
+		var prow := int(-ship_pos.z / TILE_SIZE) - _row_base
+		var pcol := clampi(roundi(ship_pos.x / TILE_SIZE), 0, _cols - 1)
+		var inside: bool = prow >= 0 and prow < _tunnels.size() and _tunnels[prow][pcol]
+		if inside != _in_portal:
+			_in_portal = inside
+			_portal_transit(inside)
 
 func _physics_process(_delta):
 	if _share_open:
@@ -315,6 +333,9 @@ func _create_space_environment():
 		6:  # The Bloom
 			env.ambient_light_color = Color(0.07, 0.12, 0.1)
 			env.ambient_light_energy = 0.4
+		7:  # Wormhole
+			env.ambient_light_color = Color(0.09, 0.07, 0.14)
+			env.ambient_light_energy = 0.4
 		_:  # Cosmic Highway
 			env.ambient_light_color = Color(0.08, 0.08, 0.12)
 			env.ambient_light_energy = 0.45
@@ -352,6 +373,10 @@ func _create_space_environment():
 			sun.basis = Basis.looking_at((light_target - Vector3(-20, 35, -260)).normalized())
 			sun.light_color = Color(1.0, 0.72, 0.62)
 			sun.light_energy = 1.3
+		7:  # Wormhole - violet light falling out of the vortex ahead
+			sun.basis = Basis.looking_at((light_target - Vector3(9, 40, -420)).normalized())
+			sun.light_color = Color(0.7, 0.55, 1.0)
+			sun.light_energy = 1.3
 		_:  # Cosmic Highway - cool starlight from upper-left
 			sun.basis = Basis.looking_at((light_target - Vector3(-30, 40, -200)).normalized())
 			sun.light_color = Color(0.8, 0.85, 1.0)
@@ -386,10 +411,15 @@ func _create_space_environment():
 		6:  # The Bloom - soft moss green
 			fill.light_color = Color(0.4, 0.7, 0.6)
 			fill.light_energy = 0.3
+		7:  # Wormhole - starts violet; every portal transit re-tints it
+			fill.light_color = WORM_PALETTE[0]
+			fill.light_energy = 0.34
 		_:  # Cosmic Highway
 			fill.light_color = Color(0.8, 0.85, 1.0)
 			fill.light_energy = 0.38
 	add_child(fill)
+	if GameState.selected_group == 7:
+		_wormhole_fill = fill
 
 	match GameState.selected_group:
 		1:
@@ -404,6 +434,8 @@ func _create_space_environment():
 			_create_wreck_background()
 		6:
 			_create_bloom_background()
+		7:
+			_create_wormhole_background()
 		_:
 			_create_image_background()
 
@@ -1165,6 +1197,8 @@ func _start_track(content: String):
 	_build_next = 0
 	_spawned_track.clear()
 	_chunk_state = {}
+	_in_portal = false
+	_portal_hops = 0
 	_level_content = content
 	_level_ready = false
 	_build_start_msec = Time.get_ticks_msec()
@@ -1444,6 +1478,27 @@ func _build_arch_job(level_node: Node3D, job: Array):
 	col_shape.shape = trimesh_shape
 	arch_body.add_child(col_shape)
 
+	# Wormhole: event-horizon rings framing both portal mouths
+	if GameState.selected_group == 7:
+		var ring_mesh := TorusMesh.new()
+		ring_mesh.inner_radius = 1.05
+		ring_mesh.outer_radius = 1.3
+		ring_mesh.rings = 24
+		ring_mesh.ring_segments = 6
+		var pring_mat := StandardMaterial3D.new()
+		pring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		pring_mat.albedo_color = Color(0.55, 0.35, 1.0)
+		pring_mat.emission_enabled = true
+		pring_mat.emission = Color(0.5, 0.3, 1.0)
+		pring_mat.emission_energy_multiplier = 2.5
+		ring_mesh.material = pring_mat
+		for endz in [tunnel_depth * 0.5, -tunnel_depth * 0.5]:
+			var pring := MeshInstance3D.new()
+			pring.mesh = ring_mesh
+			pring.rotation_degrees = Vector3(90, 0, 0)
+			pring.position = Vector3(0, 0.55, endz)
+			arch_body.add_child(pring)
+
 	arch_body.position = Vector3(center_x, base_y, center_z)
 	level_node.add_child(arch_body)
 
@@ -1533,6 +1588,7 @@ func _init_track_materials():
 		Color(0.15, 0.85, 1.0),
 		Color(0.71, 0.5, 0.34),
 		Color(1.0, 0.78, 0.45),
+		Color(0.55, 0.45, 1.0),
 	]
 	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, group_colors.size() - 1)]
 	var tile_tex := _make_tile_texture()
@@ -1583,6 +1639,8 @@ func _init_track_materials():
 			mat = _make_wreck_tile(h, glow, tile_tex)
 		elif GameState.selected_group == 6:
 			mat = _make_bloom_tile(h, glow, tile_tex)
+		elif GameState.selected_group == 7:
+			mat = _make_wormhole_tile(h, glow, tile_tex)
 		else:
 			mat.albedo_color = base_color * brightness
 			mat.albedo_color.a = 1.0
@@ -1599,6 +1657,11 @@ func _init_track_materials():
 	_tunnel_wall_mat.emission_energy_multiplier = 0.3
 	_tunnel_wall_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_apply_tile_texture(_tunnel_wall_mat, tile_tex)
+	if GameState.selected_group == 7:
+		# Wormhole bores are the portals: the throat glows from inside
+		_tunnel_wall_mat.albedo_color = Color(0.12, 0.08, 0.22)
+		_tunnel_wall_mat.emission = Color(0.5, 0.3, 1.0)
+		_tunnel_wall_mat.emission_energy_multiplier = 1.1
 
 func _free_passed_track(ship_z: float):
 	var keep: Array = []
@@ -2707,3 +2770,202 @@ func _create_bloom_background():
 	var flicker2 := create_tween().set_loops()
 	flicker2.tween_property(fly_mat, "albedo_color", Color(1.0, 0.86, 0.48, 0.9), 1.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	flicker2.tween_property(fly_mat, "albedo_color", Color(1.0, 0.72, 0.32, 0.35), 1.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+# ---------------- Wormhole (theme 7) ----------------
+
+static var _worm_ripple_tex: ImageTexture
+
+func _get_worm_ripple_texture() -> ImageTexture:
+	if _worm_ripple_tex != null:
+		return _worm_ripple_tex
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0x4802
+	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	for y in 64:
+		for x in 64:
+			var d := Vector2(x - 31.5, y - 31.5).length()
+			var band := 0.5 + 0.5 * sin(d * 0.65)
+			var v := 0.3 + band * 0.5 + rng.randf() * 0.04
+			var edge := mini(mini(x, 63 - x), mini(y, 63 - y))
+			if edge == 0:
+				v = 1.0
+			elif edge == 1:
+				v = 0.8
+			img.set_pixel(x, y, Color(v, v, v))
+	img.generate_mipmaps()
+	_worm_ripple_tex = ImageTexture.create_from_image(img)
+	return _worm_ripple_tex
+
+@warning_ignore("unused_parameter")
+func _make_wormhole_tile(h: int, glow: float, tile_tex: ImageTexture) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	var t := clampf((h - 1) / 8.0, 0.0, 1.0)
+	mat.albedo_color = Color(0.10, 0.08, 0.18).lerp(Color(0.16, 0.08, 0.2), t)
+	mat.metallic = 0.4
+	mat.roughness = 0.3
+	var ripple := _get_worm_ripple_texture()
+	_apply_tile_texture(mat, ripple)
+	mat.emission_enabled = true
+	mat.emission = Color(0.45, 0.3, 1.0).lerp(Color(0.3, 0.75, 1.0), t)
+	mat.emission_energy_multiplier = glow * (0.9 + 0.4 * t)
+	mat.emission_texture = ripple
+	return mat
+
+func _portal_transit(entering: bool):
+	var pal: Color = WORM_PALETTE[_portal_hops % WORM_PALETTE.size()]
+	if not entering:
+		_portal_hops += 1
+		pal = WORM_PALETTE[_portal_hops % WORM_PALETTE.size()]
+		if _wormhole_fill:
+			_wormhole_fill.light_color = pal
+	# Screen flash in the region's color
+	var flash := ColorRect.new()
+	flash.color = Color(pal.r, pal.g, pal.b, 0.4)
+	flash.anchor_right = 1
+	flash.anchor_bottom = 1
+	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud_canvas.add_child(flash)
+	var ft := create_tween()
+	ft.tween_property(flash, "color:a", 0.0, 0.35)
+	ft.tween_callback(flash.queue_free)
+	# FOV punch sells the jump
+	var tw := create_tween()
+	tw.tween_property(_camera, "fov", 84.0, 0.1).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(_camera, "fov", 75.0, 0.3).set_trans(Tween.TRANS_SINE)
+
+func _create_wormhole_background():
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0x40E
+	var z_min := minf(-400.0, _env_end_z - 100.0)
+	var vortex_pos := Vector3(9.0, 14.0, z_min - 160.0)
+
+	# The vortex maw: nested tilted rings in two colors baked into one
+	# mesh, slowly rotating around the view axis
+	var violet := StandardMaterial3D.new()
+	violet.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	violet.albedo_color = Color(0.55, 0.3, 1.0)
+	violet.emission_enabled = true
+	violet.emission = Color(0.5, 0.25, 1.0)
+	violet.emission_energy_multiplier = 2.2
+	var cyan := StandardMaterial3D.new()
+	cyan.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cyan.albedo_color = Color(0.3, 0.9, 1.0)
+	cyan.emission_enabled = true
+	cyan.emission = Color(0.25, 0.85, 1.0)
+	cyan.emission_energy_multiplier = 2.2
+	var vparts: Array = []
+	var cparts: Array = []
+	for i in 6:
+		var t := TorusMesh.new()
+		t.inner_radius = 10.0 + i * 7.0
+		t.outer_radius = t.inner_radius + 1.6 + i * 0.3
+		t.rings = 48
+		t.ring_segments = 6
+		var tilt := Vector3(90.0 + rng.randf_range(-13.0, 13.0), rng.randf_range(-9.0, 9.0), 0.0)
+		if i % 2 == 0:
+			vparts.append([t, _at(Vector3.ZERO, tilt)])
+		else:
+			cparts.append([t, _at(Vector3.ZERO, tilt)])
+	var vortex := MeshInstance3D.new()
+	vortex.mesh = _bake_mesh([[violet, vparts], [cyan, cparts]])
+	vortex.position = vortex_pos
+	add_child(vortex)
+	var spin := create_tween().set_loops()
+	spin.tween_property(vortex, "rotation:z", TAU, 26.0).as_relative()
+
+	# Blazing singularity core
+	var core_mat := StandardMaterial3D.new()
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core_mat.albedo_color = Color(0.95, 0.9, 1.0)
+	core_mat.emission_enabled = true
+	core_mat.emission = Color(0.85, 0.75, 1.0)
+	core_mat.emission_energy_multiplier = 4.0
+	var core_mesh := SphereMesh.new()
+	core_mesh.radius = 6.0
+	core_mesh.height = 12.0
+	core_mesh.radial_segments = 16
+	core_mesh.rings = 8
+	core_mesh.material = core_mat
+	var core := MeshInstance3D.new()
+	core.mesh = core_mesh
+	core.position = vortex_pos
+	add_child(core)
+	var core_light := OmniLight3D.new()
+	core_light.light_color = Color(0.7, 0.55, 1.0)
+	core_light.light_energy = 1.8
+	core_light.omni_range = 250.0
+	core_light.shadow_enabled = false
+	core_light.position = vortex_pos
+	add_child(core_light)
+
+	# Matter streaks being pulled toward the vortex (one MultiMesh)
+	var streak_mesh := BoxMesh.new()
+	streak_mesh.size = Vector3(0.14, 0.14, 9.0)
+	var streak_mat := StandardMaterial3D.new()
+	streak_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	streak_mat.vertex_color_use_as_albedo = true
+	streak_mesh.material = streak_mat
+	var streak_mm := MultiMesh.new()
+	streak_mm.transform_format = MultiMesh.TRANSFORM_3D
+	streak_mm.use_colors = true
+	streak_mm.mesh = streak_mesh
+	streak_mm.instance_count = 120
+	for i in 120:
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var p := Vector3(
+			9.0 + side * rng.randf_range(26.0, 120.0),
+			rng.randf_range(-25.0, 65.0),
+			rng.randf_range(z_min - 60.0, 10.0)
+		)
+		var dir := (vortex_pos - p).normalized()
+		var sb := Basis.looking_at(dir).scaled(Vector3.ONE * rng.randf_range(0.5, 1.6))
+		streak_mm.set_instance_transform(i, Transform3D(sb, p))
+		var c := Color(0.6, 0.4, 1.0) if rng.randf() < 0.6 else Color(0.3, 0.85, 1.0)
+		streak_mm.set_instance_color(i, c * rng.randf_range(0.5, 1.0))
+	var streaks := MultiMeshInstance3D.new()
+	streaks.multimesh = streak_mm
+	add_child(streaks)
+
+	# Slow spacetime dust (one billboard MultiMesh)
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1, 1, 1, 1))
+	grad.set_color(1, Color(1, 1, 1, 0))
+	var dot_tex := GradientTexture2D.new()
+	dot_tex.gradient = grad
+	dot_tex.fill = GradientTexture2D.FILL_RADIAL
+	dot_tex.fill_from = Vector2(0.5, 0.5)
+	dot_tex.fill_to = Vector2(0.5, 0.0)
+	dot_tex.width = 32
+	dot_tex.height = 32
+	var dust_mat := StandardMaterial3D.new()
+	dust_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dust_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dust_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	dust_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	dust_mat.albedo_texture = dot_tex
+	dust_mat.albedo_color = Color(0.7, 0.55, 1.0, 0.4)
+	var dust_quad := QuadMesh.new()
+	dust_quad.size = Vector2(0.8, 0.8)
+	dust_quad.material = dust_mat
+	var dust_mm := MultiMesh.new()
+	dust_mm.transform_format = MultiMesh.TRANSFORM_3D
+	dust_mm.mesh = dust_quad
+	dust_mm.instance_count = 200
+	for i in 200:
+		var dx := rng.randf_range(-80.0, 100.0)
+		var dy := rng.randf_range(-20.0, 55.0)
+		if dx > -10.0 and dx < 30.0 and dy < 10.0:
+			dy += 28.0
+		dust_mm.set_instance_transform(i, Transform3D(Basis(), Vector3(dx, dy, rng.randf_range(z_min - 40.0, 15.0))))
+	var dust := MultiMeshInstance3D.new()
+	dust.multimesh = dust_mm
+	add_child(dust)
+
+	# A second region light mid-track, re-tinted per hop via the fill
+	var mid_light := OmniLight3D.new()
+	mid_light.light_color = Color(0.4, 0.8, 1.0)
+	mid_light.light_energy = 0.8
+	mid_light.omni_range = 160.0
+	mid_light.shadow_enabled = false
+	mid_light.position = Vector3(30.0, 25.0, z_min * 0.45)
+	add_child(mid_light)

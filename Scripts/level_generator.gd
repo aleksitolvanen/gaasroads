@@ -16,8 +16,8 @@ const W := 10
 # Per-group ship physics (Cosmic, Nebula, Solar, Dark, Grid, Graveyard,
 # Bloom). Lives here rather than in an autoload so this class stays usable
 # from headless -s scripts; the ship setup reads these too.
-const GROUP_GRAVITY: Array[float] = [20.0, 20.0, 12.0, 8.0, 16.0, 24.0, 7.0]
-const GROUP_JUMP_VELOCITY: Array[float] = [8.0, 8.0, 10.0, 7.8, 8.5, 9.5, 7.0]
+const GROUP_GRAVITY: Array[float] = [20.0, 20.0, 12.0, 8.0, 16.0, 24.0, 7.0, 14.0]
+const GROUP_JUMP_VELOCITY: Array[float] = [8.0, 8.0, 10.0, 7.8, 8.5, 9.5, 7.0, 9.0]
 
 # Ship performance the gap/drift budgets assume. ship.gd's export defaults
 # must match - tests/gen_constraints.gd asserts they do.

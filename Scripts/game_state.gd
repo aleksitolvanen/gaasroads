@@ -73,7 +73,7 @@ func decode_share_code(code: String) -> Dictionary:
 		"gap_weight": clampi(parts[5].to_int(), 0, 50),
 		"tunnel_lane_weight": clampi(parts[6].to_int(), 0, 50),
 		"sharpness": clampf(parts[7].to_float(), 0.01, 0.5),
-		"theme": clampi(parts[8].to_int(), 0, 3),
+		"theme": clampi(parts[8].to_int(), 0, LevelGenerator.GROUP_GRAVITY.size() - 1),
 		"seed": parts[9].to_int(),
 		"min_height": 1,
 	}
