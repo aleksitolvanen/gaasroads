@@ -1523,7 +1523,7 @@ func _init_track_materials():
 			# surface its uneven glints; frost borders mark each 2u cell
 			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-			mat.albedo_color = Color(0.68, 0.84, 1.0) * (0.9 + (h - 1) * 0.04)
+			mat.albedo_color = Color(0.76, 0.72, 1.0) * (0.9 + (h - 1) * 0.04)
 			mat.albedo_color.a = 0.62
 			mat.metallic = 0.0
 			mat.metallic_specular = 0.8
@@ -1535,7 +1535,7 @@ func _init_track_materials():
 			mat.normal_texture = ice_normal
 			mat.normal_scale = 0.6
 			mat.emission_enabled = true
-			mat.emission = Color(0.3, 0.5, 0.75) * 0.3
+			mat.emission = Color(0.45, 0.32, 0.78) * 0.3
 			mat.emission_energy_multiplier = glow
 			_apply_tile_texture(mat, ice_tex)
 		else:
