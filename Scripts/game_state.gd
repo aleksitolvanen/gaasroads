@@ -19,7 +19,6 @@ var classical_mode := true
 var autopilot := false
 var menu_group := 1
 var menu_track := 0
-var exhaust_style := 0
 # Only menu-launched tracks may record completions/best times; imported or
 # file-loaded tracks have no menu identity to record against.
 var run_records := false

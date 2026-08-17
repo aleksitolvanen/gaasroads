@@ -172,10 +172,9 @@ func _build_ship_mesh():
 	dfin.material = body_mat
 	_part(dfin, Vector3(0, 0.17, 0.3), Vector3(0, -90, 0))
 
-	# Exhaust rig - style comes from GameState (E cycles it in game)
 	if _exhaust:
 		_exhaust.queue_free()
-	_exhaust = ShipExhaust.create(GameState.exhaust_style)
+	_exhaust = ShipExhaust.new()
 	add_child(_exhaust)
 
 func _physics_process(delta):
@@ -219,10 +218,6 @@ func _physics_process(delta):
 			lerpf(0.0, 0.05, speed_t)
 		)
 	if _exhaust:
-		if _exhaust.style != GameState.exhaust_style:
-			_exhaust.queue_free()
-			_exhaust = ShipExhaust.create(GameState.exhaust_style)
-			add_child(_exhaust)
 		_exhaust.update(speed_t)
 
 	var vel := Vector3(0, 0, -current_speed)
