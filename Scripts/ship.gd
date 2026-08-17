@@ -28,8 +28,7 @@ var _land_player: AudioStreamPlayer3D
 var _ship_parts: Array[MeshInstance3D] = []
 var _debris: Array[Node3D] = []
 var _engine_mat: StandardMaterial3D
-var _exhaust_core: CPUParticles3D
-var _exhaust_outer: CPUParticles3D
+var _exhaust: ShipExhaust
 
 const LAND_SOUND_VARIANTS := 5
 static var _land_sounds: Array[AudioStreamWAV] = []
@@ -173,88 +172,11 @@ func _build_ship_mesh():
 	dfin.material = body_mat
 	_part(dfin, Vector3(0, 0.17, 0.3), Vector3(0, -90, 0))
 
-	# Exhaust - 2 layers with large overlapping billboard spheres
-	# Forms a dense short cone (~0.5 units = half ship length)
-
-	# Core: bright white-blue, tight cone, large overlapping billboards
-	_exhaust_core = CPUParticles3D.new()
-	_exhaust_core.position = Vector3(0, 0, 0.56)
-	_exhaust_core.amount = 45
-	_exhaust_core.lifetime = 0.06
-	_exhaust_core.direction = Vector3(0, 0, 1)
-	_exhaust_core.spread = 20.0
-	_exhaust_core.initial_velocity_min = 2.0
-	_exhaust_core.initial_velocity_max = 4.0
-	_exhaust_core.gravity = Vector3.ZERO
-	_exhaust_core.damping_min = 25.0
-	_exhaust_core.damping_max = 40.0
-	_exhaust_core.scale_amount_min = 0.8
-	_exhaust_core.scale_amount_max = 1.2
-	var core_curve := Curve.new()
-	core_curve.add_point(Vector2(0, 1.0))
-	core_curve.add_point(Vector2(0.15, 0.6))
-	core_curve.add_point(Vector2(0.4, 0.2))
-	core_curve.add_point(Vector2(1.0, 0.0))
-	_exhaust_core.scale_amount_curve = core_curve
-	var core_grad := Gradient.new()
-	core_grad.set_color(0, Color(0.9, 0.97, 1.0, 0.9))
-	core_grad.add_point(0.3, Color(0.5, 0.8, 1.0, 0.6))
-	core_grad.set_color(1, Color(0.2, 0.5, 0.9, 0.0))
-	_exhaust_core.color_ramp = core_grad
-	var core_mesh := SphereMesh.new()
-	core_mesh.radius = 0.1
-	core_mesh.height = 0.2
-	var core_mat := StandardMaterial3D.new()
-	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	core_mat.albedo_color = Color(0.8, 0.95, 1.0)
-	core_mat.emission_enabled = true
-	core_mat.emission = Color(0.6, 0.85, 1.0)
-	core_mat.emission_energy_multiplier = 5.0
-	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	core_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	core_mesh.material = core_mat
-	_exhaust_core.mesh = core_mesh
-	add_child(_exhaust_core)
-
-	# Outer: softer blue glow, wider spread for cone edge
-	_exhaust_outer = CPUParticles3D.new()
-	_exhaust_outer.position = Vector3(0, 0, 0.56)
-	_exhaust_outer.amount = 35
-	_exhaust_outer.lifetime = 0.08
-	_exhaust_outer.direction = Vector3(0, 0, 1)
-	_exhaust_outer.spread = 35.0
-	_exhaust_outer.initial_velocity_min = 1.5
-	_exhaust_outer.initial_velocity_max = 3.0
-	_exhaust_outer.gravity = Vector3.ZERO
-	_exhaust_outer.damping_min = 20.0
-	_exhaust_outer.damping_max = 35.0
-	_exhaust_outer.scale_amount_min = 1.0
-	_exhaust_outer.scale_amount_max = 1.8
-	var outer_curve := Curve.new()
-	outer_curve.add_point(Vector2(0, 1.0))
-	outer_curve.add_point(Vector2(0.1, 0.5))
-	outer_curve.add_point(Vector2(0.3, 0.15))
-	outer_curve.add_point(Vector2(1.0, 0.0))
-	_exhaust_outer.scale_amount_curve = outer_curve
-	var outer_grad := Gradient.new()
-	outer_grad.set_color(0, Color(0.25, 0.55, 1.0, 0.5))
-	outer_grad.add_point(0.4, Color(0.1, 0.3, 0.8, 0.15))
-	outer_grad.set_color(1, Color(0.05, 0.15, 0.5, 0.0))
-	_exhaust_outer.color_ramp = outer_grad
-	var outer_mesh := SphereMesh.new()
-	outer_mesh.radius = 0.12
-	outer_mesh.height = 0.24
-	var outer_mat := StandardMaterial3D.new()
-	outer_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	outer_mat.albedo_color = Color(0.2, 0.5, 1.0)
-	outer_mat.emission_enabled = true
-	outer_mat.emission = Color(0.15, 0.4, 0.9)
-	outer_mat.emission_energy_multiplier = 2.5
-	outer_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	outer_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	outer_mesh.material = outer_mat
-	_exhaust_outer.mesh = outer_mesh
-	add_child(_exhaust_outer)
+	# Exhaust rig - style comes from GameState (E cycles it in game)
+	if _exhaust:
+		_exhaust.queue_free()
+	_exhaust = ShipExhaust.create(GameState.exhaust_style)
+	add_child(_exhaust)
 
 func _physics_process(delta):
 	if _state != State.NORMAL or frozen:
@@ -296,16 +218,12 @@ func _physics_process(delta):
 			lerpf(0.0, 0.1, speed_t),
 			lerpf(0.0, 0.05, speed_t)
 		)
-	var has_thrust := speed_t > 0.05
-	if _exhaust_core:
-		_exhaust_core.emitting = has_thrust
-		_exhaust_core.initial_velocity_min = lerpf(1.0, 4.0, speed_t)
-		_exhaust_core.initial_velocity_max = lerpf(2.0, 6.0, speed_t)
-	if _exhaust_outer:
-		_exhaust_outer.emitting = has_thrust
-		_exhaust_outer.initial_velocity_min = lerpf(0.8, 3.0, speed_t)
-		_exhaust_outer.initial_velocity_max = lerpf(1.5, 4.5, speed_t)
-		_exhaust_outer.spread = lerpf(25.0, 40.0, speed_t)
+	if _exhaust:
+		if _exhaust.style != GameState.exhaust_style:
+			_exhaust.queue_free()
+			_exhaust = ShipExhaust.create(GameState.exhaust_style)
+			add_child(_exhaust)
+		_exhaust.update(speed_t)
 
 	var vel := Vector3(0, 0, -current_speed)
 
@@ -443,10 +361,8 @@ func start_explosion():
 	_state = State.EXPLODING
 	PerfMonitor.mark("explosion")
 	velocity = Vector3.ZERO
-	if _exhaust_core:
-		_exhaust_core.emitting = false
-	if _exhaust_outer:
-		_exhaust_outer.emitting = false
+	if _exhaust:
+		_exhaust.shut_down()
 
 	# Reparent ship parts to scene and fling them
 	var scene_root := get_parent()
