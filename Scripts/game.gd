@@ -1450,6 +1450,35 @@ func _make_tile_texture() -> ImageTexture:
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
 
+# Frost-bordered cell for the ice theme: bright rimed edges and faint
+# internal crack lines - triplanar-tiled per 2u like the panel texture, so
+# merged tile runs still read as individual ice blocks
+func _make_ice_texture() -> ImageTexture:
+	var size := 64
+	var img := Image.create(size, size, false, Image.FORMAT_RGB8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 13
+	for y in size:
+		for x in size:
+			var edge := mini(mini(x, size - 1 - x), mini(y, size - 1 - y))
+			var v := 0.7 + rng.randf() * 0.06
+			if edge == 0:
+				v = 1.0
+			elif edge == 1:
+				v = 0.93
+			elif edge <= 3:
+				v = 0.82
+			img.set_pixel(x, y, Color(v, v, v * 1.02))
+	for _i in 6:
+		var x := rng.randi_range(8, size - 9)
+		var y := rng.randi_range(8, size - 9)
+		for _j in rng.randi_range(8, 20):
+			img.set_pixel(clampi(x, 5, size - 6), clampi(y, 5, size - 6), Color(0.9, 0.94, 1.0))
+			x += rng.randi_range(-2, 2)
+			y += rng.randi_range(-1, 2)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
 func _apply_tile_texture(mat: StandardMaterial3D, tex: ImageTexture):
 	mat.albedo_texture = tex
 	mat.uv1_triplanar = true
@@ -1471,20 +1500,44 @@ func _init_track_materials():
 
 	# Dark Matter stays murky: weakest self-glow of all themes
 	var glow := 0.28 if GameState.selected_group == 3 else 0.4
+	var ice_tex: ImageTexture
+	var ice_normal: NoiseTexture2D
+	if GameState.selected_group == 1:
+		ice_tex = _make_ice_texture()
+		var noise := FastNoiseLite.new()
+		noise.seed = 11
+		noise.frequency = 0.12
+		ice_normal = NoiseTexture2D.new()
+		ice_normal.width = 128
+		ice_normal.height = 128
+		ice_normal.noise = noise
+		ice_normal.as_normal_map = true
+		ice_normal.bump_strength = 6.0
 	for h in range(1, 10):
 		var mat := StandardMaterial3D.new()
 		var brightness := 1.2 + (h - 1) * 0.1
 		if GameState.selected_group == 1:
-			# Nebula: translucent ice cubes - pale glassy blue, no panel
-			# texture so the tiles read as clean glass blocks
+			# Nebula: solid translucent ice blocks. Backfaces render so a
+			# tile reads as a filled cube, rim approximates the fresnel
+			# frost of real ice, and the noise normal map gives the
+			# surface its uneven glints; frost borders mark each 2u cell
 			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			mat.albedo_color = Color(0.72, 0.86, 1.0) * (0.9 + (h - 1) * 0.04)
-			mat.albedo_color.a = 0.55
+			mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+			mat.albedo_color = Color(0.68, 0.84, 1.0) * (0.9 + (h - 1) * 0.04)
+			mat.albedo_color.a = 0.62
 			mat.metallic = 0.0
-			mat.roughness = 0.06
+			mat.metallic_specular = 0.8
+			mat.roughness = 0.05
+			mat.rim_enabled = true
+			mat.rim = 0.5
+			mat.rim_tint = 0.3
+			mat.normal_enabled = true
+			mat.normal_texture = ice_normal
+			mat.normal_scale = 0.6
 			mat.emission_enabled = true
 			mat.emission = Color(0.3, 0.5, 0.75) * 0.3
 			mat.emission_energy_multiplier = glow
+			_apply_tile_texture(mat, ice_tex)
 		else:
 			mat.albedo_color = base_color * brightness
 			mat.albedo_color.a = 1.0
