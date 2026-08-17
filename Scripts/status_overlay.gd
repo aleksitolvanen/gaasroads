@@ -9,6 +9,7 @@ var _s_music := false
 var _s_sfx := true
 var _s_mode := false
 var _s_ap := false
+var _s_ship := -1
 
 func _ready():
 	var layer := CanvasLayer.new()
@@ -29,18 +30,21 @@ func _ready():
 func _process(_delta):
 	# Rebuild the status line only when a flag actually changed
 	if _init and Music.enabled == _s_music and GameState.sfx_enabled == _s_sfx \
-			and GameState.classical_mode == _s_mode and GameState.autopilot == _s_ap:
+			and GameState.classical_mode == _s_mode and GameState.autopilot == _s_ap \
+			and GameState.ship_style == _s_ship:
 		return
 	_init = true
 	_s_music = Music.enabled
 	_s_sfx = GameState.sfx_enabled
 	_s_mode = GameState.classical_mode
 	_s_ap = GameState.autopilot
+	_s_ship = GameState.ship_style
 	var music_str := "ON" if _s_music else "OFF"
 	var sfx_str := "ON" if _s_sfx else "OFF"
 	var mode_str := "Classical" if _s_mode else "Normal"
 	var ap_str := " | AUTOPILOT" if _s_ap else ""
-	_label.text = "Music: %s | Sounds: %s | Mode: %s%s" % [music_str, sfx_str, mode_str, ap_str]
+	var ship_str := "" if _s_ship == 0 else " | Ship: %s" % ShipDesigns.STYLE_NAMES[_s_ship]
+	_label.text = "Music: %s | Sounds: %s | Mode: %s%s%s" % [music_str, sfx_str, mode_str, ap_str, ship_str]
 
 func _input(event):
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -50,3 +54,5 @@ func _input(event):
 			GameState.classical_mode = not GameState.classical_mode
 		elif event.keycode == KEY_P:
 			GameState.autopilot = not GameState.autopilot
+		elif event.keycode == KEY_E:
+			GameState.ship_style = (GameState.ship_style + 1) % ShipDesigns.STYLE_COUNT

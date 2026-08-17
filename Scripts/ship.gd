@@ -29,6 +29,7 @@ var _ship_parts: Array[MeshInstance3D] = []
 var _debris: Array[Node3D] = []
 var _engine_mat: StandardMaterial3D
 var _exhaust: ShipExhaust
+var _hull_style := -1
 
 const LAND_SOUND_VARIANTS := 5
 static var _land_sounds: Array[AudioStreamWAV] = []
@@ -81,100 +82,16 @@ func _part(mesh: Mesh, pos: Vector3, rot_deg := Vector3.ZERO, scl := Vector3.ONE
 	return m
 
 func _build_ship_mesh():
-	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.72, 0.12, 0.12)
-	body_mat.metallic = 0.35
-	body_mat.roughness = 0.45
-
-	var accent_mat := StandardMaterial3D.new()
-	accent_mat.albedo_color = Color(0.85, 0.85, 0.9)
-	accent_mat.metallic = 0.5
-	accent_mat.roughness = 0.35
-
-	var dark_mat := StandardMaterial3D.new()
-	dark_mat.albedo_color = Color(0.16, 0.16, 0.2)
-	dark_mat.metallic = 0.6
-	dark_mat.roughness = 0.5
-
-	var canopy_mat := StandardMaterial3D.new()
-	canopy_mat.albedo_color = Color(0.2, 0.45, 0.6)
-	canopy_mat.metallic = 0.8
-	canopy_mat.roughness = 0.15
-	canopy_mat.emission_enabled = true
-	canopy_mat.emission = Color(0.1, 0.3, 0.45)
-	canopy_mat.emission_energy_multiplier = 0.6
-
-	_engine_mat = StandardMaterial3D.new()
-	_engine_mat.albedo_color = Color(0.05, 0.05, 0.05)
-	_engine_mat.emission_enabled = true
-	_engine_mat.emission = Color(0, 0, 0)
-	_engine_mat.emission_energy_multiplier = 0.0
-
+	for pt in _ship_parts:
+		if is_instance_valid(pt):
+			pt.queue_free()
 	_ship_parts.clear()
-
-	# Fuselage: flattened capsule, wide and low
-	var hull := CapsuleMesh.new()
-	hull.radius = 0.16
-	hull.height = 1.05
-	hull.material = body_mat
-	_part(hull, Vector3(0, 0, 0.02), Vector3(90, 0, 0), Vector3(1.5, 1.0, 0.75))
-
-	# Nose cone
-	var nose := CylinderMesh.new()
-	nose.top_radius = 0.0
-	nose.bottom_radius = 0.13
-	nose.height = 0.38
-	nose.radial_segments = 12
-	nose.material = accent_mat
-	_part(nose, Vector3(0, -0.01, -0.62), Vector3(-90, 0, 0), Vector3(1.5, 1.0, 0.7))
-
-	# Cockpit canopy
-	var canopy := SphereMesh.new()
-	canopy.radius = 0.11
-	canopy.height = 0.22
-	canopy.material = canopy_mat
-	_part(canopy, Vector3(0, 0.12, -0.16), Vector3.ZERO, Vector3(1.1, 0.7, 1.7))
-
-	# Swept wings with tip fins
-	var wing := BoxMesh.new()
-	wing.size = Vector3(0.5, 0.045, 0.34)
-	wing.material = body_mat
-	_part(wing, Vector3(-0.42, -0.03, 0.16), Vector3(0, -18, -4))
-	_part(wing, Vector3(0.42, -0.03, 0.16), Vector3(0, 18, 4))
-	var fin := BoxMesh.new()
-	fin.size = Vector3(0.045, 0.15, 0.22)
-	fin.material = accent_mat
-	_part(fin, Vector3(-0.62, 0.03, 0.24), Vector3(0, -18, 0))
-	_part(fin, Vector3(0.62, 0.03, 0.24), Vector3(0, 18, 0))
-
-	# Twin engine pods with glow nozzles
-	var pod := CylinderMesh.new()
-	pod.top_radius = 0.085
-	pod.bottom_radius = 0.07
-	pod.height = 0.45
-	pod.radial_segments = 10
-	pod.material = dark_mat
-	_part(pod, Vector3(-0.24, -0.02, 0.36), Vector3(90, 0, 0))
-	_part(pod, Vector3(0.24, -0.02, 0.36), Vector3(90, 0, 0))
-	var nozzle := CylinderMesh.new()
-	nozzle.top_radius = 0.062
-	nozzle.bottom_radius = 0.062
-	nozzle.height = 0.05
-	nozzle.radial_segments = 10
-	nozzle.material = _engine_mat
-	_part(nozzle, Vector3(-0.24, -0.02, 0.6), Vector3(90, 0, 0))
-	_part(nozzle, Vector3(0.24, -0.02, 0.6), Vector3(90, 0, 0))
-
-	# Dorsal fin, apex leaning back
-	var dfin := PrismMesh.new()
-	dfin.size = Vector3(0.34, 0.2, 0.04)
-	dfin.left_to_right = 0.8
-	dfin.material = body_mat
-	_part(dfin, Vector3(0, 0.17, 0.3), Vector3(0, -90, 0))
-
+	_hull_style = GameState.ship_style
+	var spec := ShipDesigns.build(_hull_style, _part)
+	_engine_mat = spec.engine_mat
 	if _exhaust:
 		_exhaust.queue_free()
-	_exhaust = ShipExhaust.new()
+	_exhaust = ShipExhaust.new(spec.nozzles)
 	add_child(_exhaust)
 
 func _physics_process(delta):
@@ -218,6 +135,8 @@ func _physics_process(delta):
 			lerpf(0.0, 0.05, speed_t)
 		)
 	if _exhaust:
+		if _hull_style != GameState.ship_style:
+			_build_ship_mesh()
 		_exhaust.update(speed_t)
 
 	var vel := Vector3(0, 0, -current_speed)

@@ -10,8 +10,8 @@ var _cone_holders: Array[Node3D] = []
 var _cone_mats: Array[StandardMaterial3D] = []
 var _cone_base_alphas: Array[float] = []
 
-func _init():
-	for nozzle in NOZZLES:
+func _init(nozzles: Array = NOZZLES):
+	for nozzle in nozzles:
 		var holder := Node3D.new()
 		holder.position = nozzle
 		add_child(holder)
