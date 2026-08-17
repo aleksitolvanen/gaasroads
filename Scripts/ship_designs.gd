@@ -8,8 +8,8 @@ class_name ShipDesigns
 # exhaust cones. Nose points -Z, rear +Z; keep the visual roughly inside the
 # collision box (0.7 wide, 0.3 tall, 1.0 long, centered at the origin).
 
-enum { STYLE_CLASSIC, STYLE_RAPTOR, STYLE_MANTA, STYLE_HAMMER, STYLE_COMET, STYLE_COUNT }
-const STYLE_NAMES := ["Classic", "Raptor", "Manta", "Hammer", "Comet"]
+enum { STYLE_CLASSIC, STYLE_RAPTOR, STYLE_MANTA, STYLE_HAMMER, STYLE_COMET, STYLE_OUTRIDER, STYLE_SHARD, STYLE_WRAITH, STYLE_SWIFT, STYLE_COUNT }
+const STYLE_NAMES := ["Classic", "Raptor", "Manta", "Hammer", "Comet", "Outrider", "Shard", "Wraith", "Swift"]
 
 static func build(style: int, p: Callable) -> Dictionary:
 	match style:
@@ -21,6 +21,14 @@ static func build(style: int, p: Callable) -> Dictionary:
 			return _build_hammer(p)
 		STYLE_COMET:
 			return _build_comet(p)
+		STYLE_OUTRIDER:
+			return _build_outrider(p)
+		STYLE_SHARD:
+			return _build_shard(p)
+		STYLE_WRAITH:
+			return _build_wraith(p)
+		STYLE_SWIFT:
+			return _build_swift(p)
 		_:
 			return _build_classic(p)
 
@@ -489,3 +497,344 @@ static func _build_comet(p: Callable) -> Dictionary:
 	p.call(porthole, Vector3(0.202, 0.07, 0.18), Vector3.ZERO, Vector3.ONE)
 
 	return {"engine_mat": engine, "nozzles": [Vector3(0, 0.02, 0.66)]}
+
+static func _build_outrider(p: Callable) -> Dictionary:
+	var bronze := _mat(Color(0.65, 0.4, 0.2), 0.85, 0.3)
+	var dark := _mat(Color(0.1, 0.1, 0.12), 0.6, 0.45)
+	var glass := _mat(Color(0.05, 0.14, 0.18), 0.9, 0.08)
+	var plasma := _mat(Color(0.1, 0.9, 1.0), 0.0, 0.3, Color(0.2, 0.95, 1.0), 3.5)
+	var engine := _engine_mat()
+
+	var hull := CapsuleMesh.new()
+	hull.radius = 0.16
+	hull.height = 1.2
+	hull.material = bronze
+	p.call(hull, Vector3(0.42, 0.06, 0.0), Vector3(90, 0, 0), Vector3.ONE)
+	p.call(hull, Vector3(-0.42, 0.06, 0.0), Vector3(90, 0, 0), Vector3.ONE)
+
+	var spinner := CylinderMesh.new()
+	spinner.top_radius = 0.0
+	spinner.bottom_radius = 0.12
+	spinner.height = 0.24
+	spinner.radial_segments = 16
+	spinner.material = dark
+	p.call(spinner, Vector3(0.42, 0.06, -0.62), Vector3(-90, 0, 0), Vector3.ONE)
+	p.call(spinner, Vector3(-0.42, 0.06, -0.62), Vector3(-90, 0, 0), Vector3.ONE)
+
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.15
+	ring.outer_radius = 0.2
+	ring.material = plasma
+	p.call(ring, Vector3(0.42, 0.06, -0.5), Vector3(90, 0, 0), Vector3.ONE)
+	p.call(ring, Vector3(-0.42, 0.06, -0.5), Vector3(90, 0, 0), Vector3.ONE)
+
+	var arc := CylinderMesh.new()
+	arc.top_radius = 0.02
+	arc.bottom_radius = 0.02
+	arc.height = 0.84
+	arc.radial_segments = 8
+	arc.material = plasma
+	p.call(arc, Vector3(0.0, 0.06, -0.56), Vector3(0, 0, 90), Vector3.ONE)
+
+	var nozzle := CylinderMesh.new()
+	nozzle.top_radius = 0.13
+	nozzle.bottom_radius = 0.09
+	nozzle.height = 0.16
+	nozzle.radial_segments = 16
+	nozzle.material = engine
+	p.call(nozzle, Vector3(0.42, 0.06, 0.58), Vector3(90, 0, 0), Vector3.ONE)
+	p.call(nozzle, Vector3(-0.42, 0.06, 0.58), Vector3(90, 0, 0), Vector3.ONE)
+
+	var pod := CapsuleMesh.new()
+	pod.radius = 0.09
+	pod.height = 0.5
+	pod.material = dark
+	p.call(pod, Vector3(0.0, -0.02, 0.18), Vector3(90, 0, 0), Vector3.ONE)
+
+	var canopy := SphereMesh.new()
+	canopy.radius = 0.07
+	canopy.height = 0.14
+	canopy.material = glass
+	p.call(canopy, Vector3(0.0, 0.05, 0.08), Vector3.ZERO, Vector3(0.9, 0.6, 1.7))
+
+	var pylon := BoxMesh.new()
+	pylon.size = Vector3(0.34, 0.028, 0.07)
+	pylon.material = bronze
+	p.call(pylon, Vector3(0.24, 0.02, -0.02), Vector3(0, -18, 12), Vector3.ONE)
+	p.call(pylon, Vector3(0.24, 0.02, 0.36), Vector3(0, 18, 12), Vector3.ONE)
+	p.call(pylon, Vector3(-0.24, 0.02, -0.02), Vector3(0, 18, -12), Vector3.ONE)
+	p.call(pylon, Vector3(-0.24, 0.02, 0.36), Vector3(0, -18, -12), Vector3.ONE)
+
+	var fin := PrismMesh.new()
+	fin.size = Vector3(0.03, 0.24, 0.3)
+	fin.material = dark
+	p.call(fin, Vector3(0.42, 0.2, 0.4), Vector3(18, 0, 0), Vector3.ONE)
+	p.call(fin, Vector3(-0.42, 0.2, 0.4), Vector3(18, 0, 0), Vector3.ONE)
+
+	var spike := CylinderMesh.new()
+	spike.top_radius = 0.0
+	spike.bottom_radius = 0.05
+	spike.height = 0.14
+	spike.radial_segments = 12
+	spike.material = bronze
+	p.call(spike, Vector3(0.0, -0.02, 0.47), Vector3(90, 0, 0), Vector3.ONE)
+
+	return {
+		"engine_mat": engine,
+		"nozzles": [Vector3(0.42, 0.06, 0.65), Vector3(-0.42, 0.06, 0.65)]
+	}
+
+static func _build_shard(p: Callable) -> Dictionary:
+	var obsidian := _mat(Color(0.08, 0.06, 0.12), 0.6, 0.25)
+	var obsidian_lt := _mat(Color(0.14, 0.10, 0.20), 0.7, 0.2)
+	var glow := _mat(Color(0.5, 0.08, 0.42), 0.1, 0.4, Color(1.0, 0.2, 0.9), 3.0)
+	var core_mat := _mat(Color(1.0, 0.55, 0.95), 0.0, 0.3, Color(1.0, 0.2, 0.9), 4.6)
+	var engine := _engine_mat()
+
+	var spike := CylinderMesh.new()
+	spike.top_radius = 0.0
+	spike.bottom_radius = 0.17
+	spike.height = 0.92
+	spike.radial_segments = 4
+	spike.material = obsidian
+	p.call(spike, Vector3(0.0, 0.04, -0.26), Vector3(-90.0, 0.0, 0.0), Vector3.ONE)
+	p.call(spike, Vector3(0.16, -0.02, -0.05), Vector3(-84.0, -14.0, 0.0), Vector3(0.55, 0.6, 0.55))
+	p.call(spike, Vector3(-0.3, 0.1, -0.12), Vector3(-82.0, 10.0, 0.0), Vector3(0.45, 0.75, 0.45))
+	p.call(spike, Vector3(-0.26, 0.06, 0.38), Vector3(86.0, -14.0, 0.0), Vector3(0.4, 0.45, 0.4))
+	p.call(spike, Vector3(0.24, 0.1, 0.34), Vector3(94.0, 10.0, 0.0), Vector3(0.35, 0.55, 0.35))
+
+	var plate := PrismMesh.new()
+	plate.size = Vector3(0.2, 0.26, 0.8)
+	plate.left_to_right = 0.3
+	plate.material = obsidian
+	p.call(plate, Vector3(-0.26, 0.06, 0.06), Vector3(8.0, -22.0, -28.0), Vector3.ONE)
+	p.call(plate, Vector3(0.28, 0.02, 0.16), Vector3(-6.0, 15.0, 35.0), Vector3(0.9, 0.85, 0.9))
+	p.call(plate, Vector3(0.05, 0.16, 0.1), Vector3(8.0, -6.0, 72.0), Vector3(0.8, 0.75, 0.85))
+	p.call(plate, Vector3(0.0, 0.05, 0.28), Vector3(-4.0, 6.0, 180.0), Vector3(0.9, 0.8, 0.6))
+
+	var knife := BoxMesh.new()
+	knife.size = Vector3(0.07, 0.2, 0.64)
+	knife.material = obsidian
+	p.call(knife, Vector3(-0.12, 0.14, 0.3), Vector3(10.0, -18.0, -35.0), Vector3.ONE)
+	p.call(knife, Vector3(0.14, 0.12, 0.34), Vector3(-8.0, 26.0, 30.0), Vector3(0.9, 0.8, 1.1))
+	p.call(knife, Vector3(-0.38, 0.0, 0.3), Vector3(5.0, 30.0, 60.0), Vector3(0.8, 0.7, 0.9))
+	p.call(knife, Vector3(0.4, 0.08, 0.02), Vector3(-12.0, -20.0, -50.0), Vector3(0.7, 0.9, 0.8))
+	p.call(knife, Vector3(0.03, -0.07, 0.12), Vector3(4.0, 10.0, 88.0), Vector3(1.1, 0.6, 1.2))
+
+	var shardlet := PrismMesh.new()
+	shardlet.size = Vector3(0.1, 0.18, 0.36)
+	shardlet.left_to_right = 0.6
+	shardlet.material = obsidian_lt
+	p.call(shardlet, Vector3(-0.58, 0.18, -0.02), Vector3(18.0, -35.0, 40.0), Vector3.ONE)
+	p.call(shardlet, Vector3(0.56, 0.14, 0.3), Vector3(-25.0, 28.0, -15.0), Vector3(0.85, 0.9, 1.1))
+	p.call(shardlet, Vector3(0.24, 0.21, -0.3), Vector3(30.0, 10.0, -60.0), Vector3(0.7, 0.8, 0.8))
+
+	var crack := BoxMesh.new()
+	crack.size = Vector3(0.02, 0.1, 0.5)
+	crack.material = glow
+	p.call(crack, Vector3(-0.16, 0.1, 0.12), Vector3(10.0, -20.0, -30.0), Vector3.ONE)
+	p.call(crack, Vector3(0.18, 0.05, 0.02), Vector3(-6.0, 16.0, 40.0), Vector3(0.9, 1.1, 0.85))
+
+	var core := SphereMesh.new()
+	core.radius = 0.11
+	core.height = 0.22
+	core.material = core_mat
+	p.call(core, Vector3(0.0, 0.07, 0.06), Vector3.ZERO, Vector3.ONE)
+
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.09
+	ring.outer_radius = 0.13
+	ring.material = glow
+	p.call(ring, Vector3(0.0, 0.05, 0.5), Vector3(90.0, 0.0, 0.0), Vector3.ONE)
+
+	var vent := CylinderMesh.new()
+	vent.top_radius = 0.1
+	vent.bottom_radius = 0.05
+	vent.height = 0.16
+	vent.radial_segments = 4
+	vent.material = engine
+	p.call(vent, Vector3(0.0, 0.05, 0.48), Vector3(90.0, 0.0, 0.0), Vector3.ONE)
+
+	return {"engine_mat": engine, "nozzles": [Vector3(0.0, 0.05, 0.57)]}
+
+static func _build_wraith(p: Callable) -> Dictionary:
+	var hull := _mat(Color(0.04, 0.04, 0.05), 0.6, 0.3)
+	var glass := _mat(Color(0.02, 0.03, 0.05), 1.0, 0.05)
+	var edge := _mat(Color(0.08, 0.04, 0.02), 0.0, 0.6, Color(1.0, 0.45, 0.1), 3.5)
+	var engine := _engine_mat()
+
+	# Main wing blades: needle nose at z=-0.7 sweeping to tips at (+/-0.69, 0.22)
+	var wing := BoxMesh.new()
+	wing.size = Vector3(1.12, 0.06, 0.36)
+	wing.material = hull
+	p.call(wing, Vector3(0.213, 0.0, -0.124), Vector3(0.0, -53.6, 0.0), Vector3.ONE)
+	p.call(wing, Vector3(-0.213, 0.0, -0.124), Vector3(0.0, 53.6, 0.0), Vector3.ONE)
+
+	# Center spine running nose to engine shelf
+	var spine := BoxMesh.new()
+	spine.size = Vector3(0.28, 0.075, 1.1)
+	spine.material = hull
+	p.call(spine, Vector3(0.0, 0.0, -0.1), Vector3.ZERO, Vector3.ONE)
+
+	# Rear engine shelf: flat center bar of the W trailing edge
+	var shelf := BoxMesh.new()
+	shelf.size = Vector3(0.5, 0.07, 0.4)
+	shelf.material = hull
+	p.call(shelf, Vector3(0.0, 0.0, 0.30), Vector3.ZERO, Vector3.ONE)
+
+	# Needle nose spike
+	var spike := CylinderMesh.new()
+	spike.top_radius = 0.0
+	spike.bottom_radius = 0.045
+	spike.height = 0.34
+	spike.radial_segments = 6
+	spike.material = hull
+	p.call(spike, Vector3(0.0, 0.0, -0.57), Vector3(-90.0, 0.0, 0.0), Vector3.ONE)
+
+	# Sawtooth teeth: 45-degree diamonds poking rear points out of the trailing edge
+	var tooth := BoxMesh.new()
+	tooth.size = Vector3(0.3, 0.055, 0.3)
+	tooth.material = hull
+	p.call(tooth, Vector3(0.37, 0.0, 0.31), Vector3(0.0, 45.0, 0.0), Vector3.ONE)
+	p.call(tooth, Vector3(-0.37, 0.0, 0.31), Vector3(0.0, -45.0, 0.0), Vector3.ONE)
+
+	# Low glass blister sunk into the spine
+	var canopy := SphereMesh.new()
+	canopy.radius = 0.12
+	canopy.height = 0.08
+	canopy.material = glass
+	p.call(canopy, Vector3(0.0, 0.03, -0.2), Vector3.ZERO, Vector3(1.0, 1.0, 1.7))
+
+	# Blazing outline: leading edges
+	var strip_le := BoxMesh.new()
+	strip_le.size = Vector3(1.06, 0.02, 0.05)
+	strip_le.material = edge
+	p.call(strip_le, Vector3(0.345, 0.0, -0.22), Vector3(0.0, -53.6, 0.0), Vector3.ONE)
+	p.call(strip_le, Vector3(-0.345, 0.0, -0.22), Vector3(0.0, 53.6, 0.0), Vector3.ONE)
+
+	# Blazing outline: raked wingtip edges
+	var strip_tip := BoxMesh.new()
+	strip_tip.size = Vector3(0.36, 0.02, 0.05)
+	strip_tip.material = edge
+	p.call(strip_tip, Vector3(0.539, 0.0, 0.319), Vector3(0.0, 36.4, 0.0), Vector3.ONE)
+	p.call(strip_tip, Vector3(-0.539, 0.0, 0.319), Vector3(0.0, -36.4, 0.0), Vector3.ONE)
+
+	# Blazing outline: forward-swept trailing edges, glowing through the notches
+	var strip_te := BoxMesh.new()
+	strip_te.size = Vector3(0.68, 0.02, 0.05)
+	strip_te.material = edge
+	p.call(strip_te, Vector3(0.2, 0.0, 0.148), Vector3(0.0, -53.6, 0.0), Vector3.ONE)
+	p.call(strip_te, Vector3(-0.2, 0.0, 0.148), Vector3(0.0, 53.6, 0.0), Vector3.ONE)
+
+	# Blazing outline: sawtooth rear edges of both teeth
+	var strip_tooth := BoxMesh.new()
+	strip_tooth.size = Vector3(0.32, 0.02, 0.05)
+	strip_tooth.material = edge
+	p.call(strip_tooth, Vector3(0.476, 0.0, 0.416), Vector3(0.0, 45.0, 0.0), Vector3.ONE)
+	p.call(strip_tooth, Vector3(0.264, 0.0, 0.416), Vector3(0.0, -45.0, 0.0), Vector3.ONE)
+	p.call(strip_tooth, Vector3(-0.476, 0.0, 0.416), Vector3(0.0, -45.0, 0.0), Vector3.ONE)
+	p.call(strip_tooth, Vector3(-0.264, 0.0, 0.416), Vector3(0.0, 45.0, 0.0), Vector3.ONE)
+
+	# Twin flat wide nozzles half-buried in the shelf's rear face
+	var nozzle := BoxMesh.new()
+	nozzle.size = Vector3(0.18, 0.05, 0.12)
+	nozzle.material = engine
+	p.call(nozzle, Vector3(0.2, 0.0, 0.48), Vector3.ZERO, Vector3.ONE)
+	p.call(nozzle, Vector3(-0.2, 0.0, 0.48), Vector3.ZERO, Vector3.ONE)
+
+	return {
+		"engine_mat": engine,
+		"nozzles": [Vector3(0.2, 0.0, 0.55), Vector3(-0.2, 0.0, 0.55)],
+	}
+
+static func _build_swift(p: Callable) -> Dictionary:
+	var pearl := _mat(Color(0.92, 0.9, 0.86), 0.4, 0.3)
+	var gold := _mat(Color(0.9, 0.7, 0.2), 0.9, 0.2)
+	var crimson := _mat(Color(0.72, 0.08, 0.1), 0.3, 0.35)
+	var glass := _mat(Color(0.08, 0.1, 0.14), 0.9, 0.1)
+	var amber := _mat(Color(1.0, 0.75, 0.3), 0.0, 0.4, Color(1.0, 0.55, 0.12), 2.5)
+	var engine := _engine_mat()
+
+	var hull := CapsuleMesh.new()
+	hull.radius = 0.14
+	hull.height = 1.0
+	hull.material = pearl
+	p.call(hull, Vector3(0, 0.03, 0.0), Vector3(90, 0, 0), Vector3.ONE)
+
+	var beak := CylinderMesh.new()
+	beak.top_radius = 0.0
+	beak.bottom_radius = 0.14
+	beak.height = 0.42
+	beak.radial_segments = 24
+	beak.material = pearl
+	p.call(beak, Vector3(0, 0.01, -0.52), Vector3(-103, 0, 0), Vector3.ONE)
+
+	var throat := BoxMesh.new()
+	throat.size = Vector3(0.12, 0.05, 0.24)
+	throat.material = crimson
+	p.call(throat, Vector3(0, -0.075, -0.42), Vector3(-12, 0, 0), Vector3.ONE)
+
+	var canopy := SphereMesh.new()
+	canopy.radius = 0.095
+	canopy.height = 0.13
+	canopy.material = glass
+	p.call(canopy, Vector3(0, 0.16, -0.14), Vector3.ZERO, Vector3(0.85, 1.0, 1.7))
+
+	var wing_in := BoxMesh.new()
+	wing_in.size = Vector3(0.36, 0.035, 0.20)
+	wing_in.material = pearl
+	p.call(wing_in, Vector3(0.267, 0.05, 0.235), Vector3(0, 30, 0), Vector3.ONE)
+	p.call(wing_in, Vector3(-0.267, 0.05, 0.235), Vector3(0, -30, 0), Vector3.ONE)
+
+	var wing_out := BoxMesh.new()
+	wing_out.size = Vector3(0.48, 0.03, 0.14)
+	wing_out.material = pearl
+	p.call(wing_out, Vector3(0.545, 0.05, -0.046), Vector3(0, 55, 0), Vector3.ONE)
+	p.call(wing_out, Vector3(-0.545, 0.05, -0.046), Vector3(0, -55, 0), Vector3.ONE)
+
+	var trim_in := BoxMesh.new()
+	trim_in.size = Vector3(0.34, 0.014, 0.11)
+	trim_in.material = gold
+	p.call(trim_in, Vector3(0.267, 0.072, 0.235), Vector3(0, 30, 0), Vector3.ONE)
+	p.call(trim_in, Vector3(-0.267, 0.072, 0.235), Vector3(0, -30, 0), Vector3.ONE)
+
+	var trim_out := BoxMesh.new()
+	trim_out.size = Vector3(0.44, 0.014, 0.075)
+	trim_out.material = gold
+	p.call(trim_out, Vector3(0.545, 0.068, -0.046), Vector3(0, 55, 0), Vector3.ONE)
+	p.call(trim_out, Vector3(-0.545, 0.068, -0.046), Vector3(0, -55, 0), Vector3.ONE)
+
+	var tip_light := SphereMesh.new()
+	tip_light.radius = 0.04
+	tip_light.height = 0.06
+	tip_light.material = amber
+	p.call(tip_light, Vector3(0.665, 0.055, -0.245), Vector3.ZERO, Vector3.ONE)
+	p.call(tip_light, Vector3(-0.665, 0.055, -0.245), Vector3.ZERO, Vector3.ONE)
+
+	var fork := BoxMesh.new()
+	fork.size = Vector3(0.14, 0.03, 0.34)
+	fork.material = pearl
+	p.call(fork, Vector3(0.22, 0.06, 0.56), Vector3(0, 28, 0), Vector3.ONE)
+	p.call(fork, Vector3(-0.22, 0.06, 0.56), Vector3(0, -28, 0), Vector3.ONE)
+
+	var trim_fork := BoxMesh.new()
+	trim_fork.size = Vector3(0.10, 0.014, 0.28)
+	trim_fork.material = gold
+	p.call(trim_fork, Vector3(0.22, 0.082, 0.56), Vector3(0, 28, 0), Vector3.ONE)
+	p.call(trim_fork, Vector3(-0.22, 0.082, 0.56), Vector3(0, -28, 0), Vector3.ONE)
+
+	var collar := TorusMesh.new()
+	collar.inner_radius = 0.10
+	collar.outer_radius = 0.145
+	collar.material = gold
+	p.call(collar, Vector3(0, 0.03, 0.45), Vector3(90, 0, 0), Vector3.ONE)
+
+	var nozzle := CylinderMesh.new()
+	nozzle.top_radius = 0.13
+	nozzle.bottom_radius = 0.10
+	nozzle.height = 0.14
+	nozzle.radial_segments = 20
+	nozzle.material = engine
+	p.call(nozzle, Vector3(0, 0.03, 0.52), Vector3(90, 0, 0), Vector3.ONE)
+
+	return {"engine_mat": engine, "nozzles": [Vector3(0, 0.03, 0.59)]}

@@ -1474,12 +1474,24 @@ func _init_track_materials():
 	for h in range(1, 10):
 		var mat := StandardMaterial3D.new()
 		var brightness := 1.2 + (h - 1) * 0.1
-		mat.albedo_color = base_color * brightness
-		mat.albedo_color.a = 1.0
-		mat.emission_enabled = true
-		mat.emission = base_color * 0.3
-		mat.emission_energy_multiplier = glow
-		_apply_tile_texture(mat, tile_tex)
+		if GameState.selected_group == 1:
+			# Nebula: translucent ice cubes - pale glassy blue, no panel
+			# texture so the tiles read as clean glass blocks
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			mat.albedo_color = Color(0.72, 0.86, 1.0) * (0.9 + (h - 1) * 0.04)
+			mat.albedo_color.a = 0.55
+			mat.metallic = 0.0
+			mat.roughness = 0.06
+			mat.emission_enabled = true
+			mat.emission = Color(0.3, 0.5, 0.75) * 0.3
+			mat.emission_energy_multiplier = glow
+		else:
+			mat.albedo_color = base_color * brightness
+			mat.albedo_color.a = 1.0
+			mat.emission_enabled = true
+			mat.emission = base_color * 0.3
+			mat.emission_energy_multiplier = glow
+			_apply_tile_texture(mat, tile_tex)
 		_height_materials[h] = mat
 
 	_tunnel_wall_mat = StandardMaterial3D.new()
