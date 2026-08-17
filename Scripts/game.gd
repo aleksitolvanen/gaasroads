@@ -169,6 +169,8 @@ func _process(delta):
 		var inside: bool = prow >= 0 and prow < _tunnels.size() and _tunnels[prow][pcol]
 		if inside != _in_portal:
 			_in_portal = inside
+			if inside:
+				_portal_swap(prow, pcol)
 			_portal_transit(inside)
 
 func _physics_process(_delta):
@@ -2810,6 +2812,34 @@ func _make_wormhole_tile(h: int, glow: float, tile_tex: ImageTexture) -> Standar
 	mat.emission_energy_multiplier = glow * (0.9 + 0.4 * t)
 	mat.emission_texture = ripple
 	return mat
+
+# Twin bores teleport: entering one drops you into the other at the same
+# row and height (solve_level.py::find_portal_swaps mirrors this rule)
+func _portal_swap(prow: int, pcol: int):
+	var row: Array = _tunnels[prow]
+	var runs: Array = []
+	var c := 0
+	while c < _cols:
+		if row[c]:
+			var start := c
+			while c < _cols and row[c]:
+				c += 1
+			runs.append([start, c - 1])
+		else:
+			c += 1
+	if runs.size() != 2:
+		return
+	var mine := -1
+	for i in runs.size():
+		if pcol >= runs[i][0] and pcol <= runs[i][1]:
+			mine = i
+	if mine < 0:
+		return
+	var other: Array = runs[1 - mine]
+	var own: Array = runs[mine]
+	var dx := (float(other[0] + other[1]) - float(own[0] + own[1])) * 0.5 * TILE_SIZE
+	_ship.global_position.x += dx
+	_ship.reset_physics_interpolation()
 
 func _portal_transit(entering: bool):
 	var pal: Color = WORM_PALETTE[_portal_hops % WORM_PALETTE.size()]

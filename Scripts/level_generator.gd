@@ -414,6 +414,28 @@ static func _pat_tunnel(state: Dictionary, out: Array, it: float, budget: int):
 	var lim: Dictionary = state.lim
 	var h: int = clampi(ifc.h, 1, mini(4, lim.entry_h))
 	var w := 2 if it >= 0.4 or rng.randf() < 0.4 else 3
+	# Wormhole theme: twin parallel bores - the game teleports the ship
+	# from one into the other on entry (solve_level.py models the same
+	# swap). Identical width/height/rows, walled apart so you must pick.
+	if state.p.get("theme", 0) == 7 and rng.randf() < 0.65:
+		var gap := 1 + (1 if rng.randf() < 0.3 and W >= 2 * w + 4 else 0)
+		var span := 2 * w + gap
+		if span + 2 <= W:
+			var tp := clampi(ifc.pos + (ifc.w - span) / 2, 1, W - span - 1)
+			var lead := clampi(tp - 1, 0, W - span - 2)
+			_connect(state, out, lead, span + 2, h)
+			_lane_rows(state, out, 2)
+			var twin_len := clampi(int(8.0 + it * 18.0 + rng.randi_range(0, 8)), 6, maxi(6, budget - 8))
+			var wall_h := mini(h + 5, 9)
+			for _i in twin_len:
+				var tr := _cells()
+				_fill(tr, tp, tp + w, h, "T")
+				_fill(tr, tp + w, tp + w + gap, wall_h)
+				_fill(tr, tp + w + gap, tp + span, h, "T")
+				out.append(_row_str(tr))
+			state.iface = {"pos": lead, "w": span + 2, "h": h}
+			_lane_rows(state, out, 2)
+			return
 	var pos := clampi(ifc.pos + (ifc.w - w) / 2 + rng.randi_range(-2, 2), 1, W - w - 1)
 	# walled bore: thread the tunnel, or - when the wall is jumpable - climb
 	# onto the massif and ride the top

@@ -183,6 +183,7 @@ loop around it is.)
 | Ship collision box (`Scenes/Ship.tscn`) | `HALF_W/HALF_L/HALF_H` in `solve_level.py` |
 | Tile size / tunnel arch geometry (`Scripts/game.gd`) | `TUNNEL_OPEN` / `TUNNEL_CEIL` and tile math in `solve_level.py`; `TILE_SIZE`-derived constants in `tests/test_autopilot.gd` and `Scripts/autopilot.gd` |
 | Runway prelude (24 rows, cols 2-7, height 1 — `game.gd::_start_track`) | the runway copies in `tests/test_autopilot.gd` and `solve_level.py::load_level` (incl. its `- 24` row offset when reporting) |
+| Wormhole twin-bore teleport rule (`game.gd::_portal_swap`) | `solve_level.py::find_portal_swaps` + the crossing-row swap in `tick()`; the twin pattern in `LevelGenerator._pat_tunnel` |
 | Generator segment shapes | invariants in `tests/gen_constraints.gd` |
 
 Then, in order:

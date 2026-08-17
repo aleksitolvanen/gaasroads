@@ -69,7 +69,36 @@ def load_level(path):
     return tops, tun
 
 
-def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=True, stall_limit=400_000, classical=True, trace_path=None):
+def find_portal_swaps(tops, tun):
+    """Wormhole twin bores: rows where exactly two tunnel runs both BEGIN.
+
+    Entering either run teleports the ship laterally into the other
+    (game.gd::_portal_swap). Returns {row: ((c0, c1, dx), (c0, c1, dx))}
+    with dx in world units."""
+    swaps = {}
+    for r in range(len(tops)):
+        runs = []
+        c = 0
+        while c < 10:
+            if tun[r][c]:
+                start = c
+                while c < 10 and tun[r][c]:
+                    c += 1
+                entry = all(r == 0 or not tun[r - 1][cc] for cc in range(start, c))
+                runs.append((start, c - 1, entry))
+            else:
+                c += 1
+        if len(runs) == 2 and runs[0][2] and runs[1][2]:
+            ca = (runs[0][0] + runs[0][1]) * 1.0
+            cb = (runs[1][0] + runs[1][1]) * 1.0
+            swaps[r] = (
+                (runs[0][0], runs[0][1], cb - ca),
+                (runs[1][0], runs[1][1], ca - cb),
+            )
+    return swaps
+
+
+def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=True, stall_limit=400_000, classical=True, trace_path=None, portal_swaps=None):
     rows = len(tops)
     goal_u = (rows - 1) * 2.0
     ncols = 10
@@ -189,6 +218,14 @@ def solve(tops, tun, grav, jump_v, budget_s, k=3, max_states=4_000_000, strict=T
         # can't cheat over a wall
         nr0, nr1 = rows_at(nu)
         for r in range(r1 + 1, nr1 + 1):
+            # wormhole twin bores: crossing into an entry row of a bore
+            # pair teleports the ship laterally into the partner bore
+            if portal_swaps and r in portal_swaps:
+                for c0, c1, pdx in portal_swaps[r]:
+                    if c0 * 2.0 - 1.0 <= nx <= c1 * 2.0 + 1.0:
+                        nx += pdx
+                        nc0, nc1 = cols_at(nx)
+                        break
             f = 0.0
             if nu > u:
                 f = max(0.0, min(1.0, (2.0 * r - 1.0 - (u + HALF_L)) / (nu - u)))
@@ -360,10 +397,12 @@ def main():
             any_fail = True
             continue
         t0 = time.monotonic()
+        swaps = find_portal_swaps(tops, tun) if theme == 7 else None
         verdict, u, states, tape = solve(
             tops, tun, GROUP_GRAVITY[theme], GROUP_JUMP[theme], args.budget,
             args.k, strict=not args.exploits, stall_limit=args.stall,
-            classical=not args.normal, trace_path=args.dump_trace
+            classical=not args.normal, trace_path=args.dump_trace,
+            portal_swaps=swaps
         )
         dt = time.monotonic() - t0
         row = u / 2.0 - 24  # file-relative row reached
