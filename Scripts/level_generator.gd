@@ -13,11 +13,11 @@ class_name LevelGenerator
 
 const W := 10
 
-# Per-group ship physics (Cosmic, Nebula, Solar, Dark). Lives here rather
-# than in an autoload so this class stays usable from headless -s scripts;
-# the ship setup reads these too.
-const GROUP_GRAVITY: Array[float] = [20.0, 20.0, 12.0, 8.0]
-const GROUP_JUMP_VELOCITY: Array[float] = [8.0, 8.0, 10.0, 7.8]
+# Per-group ship physics (Cosmic, Nebula, Solar, Dark, Grid, Graveyard,
+# Bloom). Lives here rather than in an autoload so this class stays usable
+# from headless -s scripts; the ship setup reads these too.
+const GROUP_GRAVITY: Array[float] = [20.0, 20.0, 12.0, 8.0, 16.0, 24.0, 7.0]
+const GROUP_JUMP_VELOCITY: Array[float] = [8.0, 8.0, 10.0, 7.8, 8.5, 9.5, 7.0]
 
 # Ship performance the gap/drift budgets assume. ship.gd's export defaults
 # must match - tests/gen_constraints.gd asserts they do.
@@ -39,7 +39,7 @@ static func generate(p: Dictionary) -> String:
 static func chunk_begin(p: Dictionary) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = p.get("seed", randi())
-	var theme: int = clampi(p.get("theme", 0), 0, 3)
+	var theme: int = clampi(p.get("theme", 0), 0, GROUP_GRAVITY.size() - 1)
 	var lim := jump_limits(theme)
 	var weights: int = p.get("tunnel_weight", 10) + p.get("narrow_weight", 15) \
 		+ p.get("gap_weight", 10) + p.get("tunnel_lane_weight", 8)

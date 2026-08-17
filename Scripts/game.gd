@@ -72,7 +72,7 @@ func _ready():
 	_ship.warped.connect(_on_ship_warped)
 	_ship.exploded.connect(_on_ship_exploded)
 
-	var grp := clampi(GameState.selected_group, 0, 3)
+	var grp := clampi(GameState.selected_group, 0, LevelGenerator.GROUP_GRAVITY.size() - 1)
 	_ship.gravity = LevelGenerator.GROUP_GRAVITY[grp]
 	_ship.jump_velocity = LevelGenerator.GROUP_JUMP_VELOCITY[grp]
 	_camera = $Camera3D
@@ -306,6 +306,15 @@ func _create_space_environment():
 		3:  # Dark Matter
 			env.ambient_light_color = Color(0.06, 0.1, 0.08)
 			env.ambient_light_energy = 0.28
+		4:  # The Grid
+			env.ambient_light_color = Color(0.05, 0.10, 0.13)
+			env.ambient_light_energy = 0.35
+		5:  # The Graveyard
+			env.ambient_light_color = Color(0.1, 0.08, 0.07)
+			env.ambient_light_energy = 0.4
+		6:  # The Bloom
+			env.ambient_light_color = Color(0.07, 0.12, 0.1)
+			env.ambient_light_energy = 0.4
 		_:  # Cosmic Highway
 			env.ambient_light_color = Color(0.08, 0.08, 0.12)
 			env.ambient_light_energy = 0.45
@@ -331,6 +340,18 @@ func _create_space_environment():
 			sun.basis = Basis.looking_at((light_target - Vector3(30, 18, -350)).normalized())
 			sun.light_color = Color(0.4, 0.8, 0.5)
 			sun.light_energy = 1.0
+		4:  # The Grid - cold datalight from the portal side
+			sun.basis = Basis.looking_at((light_target - Vector3(-40, 55, -240)).normalized())
+			sun.light_color = Color(0.6, 0.9, 1.0)
+			sun.light_energy = 1.4
+		5:  # The Graveyard - pale dead-star light low on the horizon
+			sun.basis = Basis.looking_at((light_target - Vector3(120, 30, -500)).normalized())
+			sun.light_color = Color(0.85, 0.78, 0.68)
+			sun.light_energy = 1.1
+		6:  # The Bloom - warm rose glow from the mother bloom
+			sun.basis = Basis.looking_at((light_target - Vector3(-20, 35, -260)).normalized())
+			sun.light_color = Color(1.0, 0.72, 0.62)
+			sun.light_energy = 1.3
 		_:  # Cosmic Highway - cool starlight from upper-left
 			sun.basis = Basis.looking_at((light_target - Vector3(-30, 40, -200)).normalized())
 			sun.light_color = Color(0.8, 0.85, 1.0)
@@ -356,6 +377,15 @@ func _create_space_environment():
 		3:  # Dark Matter - pale green, kept dimmest so the theme stays murky
 			fill.light_color = Color(0.55, 0.85, 0.7)
 			fill.light_energy = 0.28
+		4:  # The Grid - magenta counterlight against the cyan
+			fill.light_color = Color(0.55, 0.25, 0.6)
+			fill.light_energy = 0.3
+		5:  # The Graveyard - dim rust
+			fill.light_color = Color(0.42, 0.26, 0.18)
+			fill.light_energy = 0.3
+		6:  # The Bloom - soft moss green
+			fill.light_color = Color(0.4, 0.7, 0.6)
+			fill.light_energy = 0.3
 		_:  # Cosmic Highway
 			fill.light_color = Color(0.8, 0.85, 1.0)
 			fill.light_energy = 0.38
@@ -368,6 +398,12 @@ func _create_space_environment():
 			_create_solar_background()
 		3:
 			_create_dark_matter_background()
+		4:
+			_create_grid_background()
+		5:
+			_create_wreck_background()
+		6:
+			_create_bloom_background()
 		_:
 			_create_image_background()
 
@@ -1494,8 +1530,11 @@ func _init_track_materials():
 		Color(0.7, 0.4, 0.9),
 		Color(1.0, 0.6, 0.25),
 		Color(0.3, 0.68, 0.45),
+		Color(0.15, 0.85, 1.0),
+		Color(0.71, 0.5, 0.34),
+		Color(1.0, 0.78, 0.45),
 	]
-	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, 3)]
+	var base_color: Color = group_colors[clampi(GameState.selected_group, 0, group_colors.size() - 1)]
 	var tile_tex := _make_tile_texture()
 
 	# Dark Matter stays murky: weakest self-glow of all themes
@@ -1538,6 +1577,12 @@ func _init_track_materials():
 			mat.emission = Color(0.45, 0.32, 0.78) * 0.3
 			mat.emission_energy_multiplier = glow
 			_apply_tile_texture(mat, ice_tex)
+		elif GameState.selected_group == 4:
+			mat = _make_grid_tile(h, glow, tile_tex)
+		elif GameState.selected_group == 5:
+			mat = _make_wreck_tile(h, glow, tile_tex)
+		elif GameState.selected_group == 6:
+			mat = _make_bloom_tile(h, glow, tile_tex)
 		else:
 			mat.albedo_color = base_color * brightness
 			mat.albedo_color.a = 1.0
@@ -1776,3 +1821,889 @@ func _create_merged_tile(tiles_wide: int, tiles_deep: int, height: float, materi
 	body.add_child(col)
 
 	return body
+
+# ---------------- The Grid (theme 4) ----------------
+
+static var _grid_circuit_tex: ImageTexture
+
+func _get_grid_circuit_texture() -> ImageTexture:
+	if _grid_circuit_tex != null:
+		return _grid_circuit_tex
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xCAFE
+	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	img.fill(Color(0.16, 0.16, 0.16))
+	var edge := Color(0.9, 0.9, 0.9)
+	var edge_dim := Color(0.42, 0.42, 0.42)
+	for i in 64:
+		img.set_pixel(i, 0, edge)
+		img.set_pixel(0, i, edge)
+		img.set_pixel(i, 63, edge)
+		img.set_pixel(63, i, edge)
+		img.set_pixel(i, 1, edge_dim)
+		img.set_pixel(1, i, edge_dim)
+		img.set_pixel(i, 62, edge_dim)
+		img.set_pixel(62, i, edge_dim)
+	var trace := Color(0.72, 0.72, 0.72)
+	var pad := Color(1.0, 1.0, 1.0)
+	for _n in 9:
+		var cx := rng.randi_range(10, 53)
+		var cy := rng.randi_range(10, 53)
+		var horiz := rng.randf() < 0.5
+		var d1 := -1 if rng.randf() < 0.5 else 1
+		var d2 := -1 if rng.randf() < 0.5 else 1
+		for px in range(cx - 1, cx + 2):
+			for py in range(cy - 1, cy + 2):
+				img.set_pixel(clampi(px, 3, 60), clampi(py, 3, 60), pad)
+		for _s in rng.randi_range(8, 18):
+			if horiz:
+				cx = clampi(cx + d1, 4, 59)
+			else:
+				cy = clampi(cy + d1, 4, 59)
+			img.set_pixel(cx, cy, trace)
+		for _s in rng.randi_range(6, 14):
+			if horiz:
+				cy = clampi(cy + d2, 4, 59)
+			else:
+				cx = clampi(cx + d2, 4, 59)
+			img.set_pixel(cx, cy, trace)
+		for px in range(cx - 1, cx + 2):
+			for py in range(cy - 1, cy + 2):
+				img.set_pixel(clampi(px, 3, 60), clampi(py, 3, 60), pad)
+	img.generate_mipmaps()
+	_grid_circuit_tex = ImageTexture.create_from_image(img)
+	return _grid_circuit_tex
+
+@warning_ignore("unused_parameter")
+func _make_grid_tile(h: int, glow: float, tile_tex: ImageTexture) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	var t := clampf((h - 1) / 8.0, 0.0, 1.0)
+	var trace_col := Color(0.12, 0.85, 1.0).lerp(Color(0.75, 0.3, 1.0), t * 0.5)
+	mat.albedo_color = Color(0.05, 0.09, 0.13).lerp(Color(0.09, 0.06, 0.14), t)
+	mat.metallic = 0.65
+	mat.roughness = 0.32
+	mat.emission_enabled = true
+	mat.emission = trace_col
+	mat.emission_energy_multiplier = glow * (0.85 + 0.55 * t)
+	var tex := _get_grid_circuit_texture()
+	_apply_tile_texture(mat, tex)
+	mat.emission_texture = tex
+	return mat
+
+func _create_grid_background():
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xDA7A
+	var z_min := minf(-400.0, _env_end_z - 100.0)
+	var z_span := absf(z_min)
+
+	# Wireframe floor plane far below
+	var grid_img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	grid_img.fill(Color(0.008, 0.012, 0.025))
+	var line_col := Color(0.05, 0.7, 0.85)
+	var line_dim := Color(0.02, 0.28, 0.36)
+	for i in 64:
+		grid_img.set_pixel(i, 0, line_col)
+		grid_img.set_pixel(0, i, line_col)
+		grid_img.set_pixel(i, 1, line_dim)
+		grid_img.set_pixel(1, i, line_dim)
+	grid_img.generate_mipmaps()
+	var grid_tex := ImageTexture.create_from_image(grid_img)
+	var floor_mat := StandardMaterial3D.new()
+	floor_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	floor_mat.albedo_texture = grid_tex
+	floor_mat.uv1_scale = Vector3(64.0, 64.0, 1.0)
+	floor_mat.emission_enabled = true
+	floor_mat.emission = Color(0.15, 0.75, 0.95)
+	floor_mat.emission_energy_multiplier = 0.8
+	floor_mat.emission_texture = grid_tex
+	var floor_mesh := PlaneMesh.new()
+	floor_mesh.size = Vector2(1400.0, z_span + 600.0)
+	floor_mesh.material = floor_mat
+	var floor_inst := MeshInstance3D.new()
+	floor_inst.mesh = floor_mesh
+	floor_inst.transform = _at(Vector3(9.0, -25.0, z_min * 0.5))
+	add_child(floor_inst)
+
+	# Server monoliths with neon corner strips (one baked mesh, 2 surfaces)
+	var body_mat := StandardMaterial3D.new()
+	body_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	body_mat.albedo_color = Color(0.025, 0.04, 0.07)
+	var strip_mat := StandardMaterial3D.new()
+	strip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	strip_mat.albedo_color = Color(0.25, 0.95, 1.0)
+	strip_mat.emission_enabled = true
+	strip_mat.emission = Color(0.2, 0.9, 1.0)
+	strip_mat.emission_energy_multiplier = 2.0
+	var unit_box := BoxMesh.new()
+	var body_parts: Array = []
+	var strip_parts: Array = []
+	for i in 16:
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var tx := 9.0 + side * rng.randf_range(45.0, 150.0)
+		var tz := rng.randf_range(z_min - 120.0, -50.0)
+		var th := rng.randf_range(30.0, 95.0)
+		var tw := rng.randf_range(6.0, 16.0)
+		var pos := Vector3(tx, -25.0 + th * 0.5, tz)
+		var rot := Basis(Vector3.UP, rng.randf_range(-0.35, 0.35))
+		body_parts.append([unit_box, Transform3D(rot * Basis.from_scale(Vector3(tw, th, tw)), pos)])
+		var c := tw * 0.5
+		strip_parts.append([unit_box, Transform3D(rot * Basis.from_scale(Vector3(0.5, th * 0.98, 0.5)), pos + rot * Vector3(c, 0.0, c))])
+		strip_parts.append([unit_box, Transform3D(rot * Basis.from_scale(Vector3(0.5, th * 0.98, 0.5)), pos + rot * Vector3(-c, 0.0, -c))])
+		strip_parts.append([unit_box, Transform3D(rot * Basis.from_scale(Vector3(tw * 0.7, 0.5, tw * 0.7)), pos + Vector3(0.0, th * 0.5 + 0.3, 0.0))])
+	var towers := MeshInstance3D.new()
+	towers.mesh = _bake_mesh([[body_mat, body_parts], [strip_mat, strip_parts]])
+	add_child(towers)
+
+	# Portal gate ring at the far end (one baked mesh, 2 surfaces)
+	var ring_cyan := StandardMaterial3D.new()
+	ring_cyan.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_cyan.albedo_color = Color(0.3, 0.95, 1.0)
+	ring_cyan.emission_enabled = true
+	ring_cyan.emission = Color(0.25, 0.9, 1.0)
+	ring_cyan.emission_energy_multiplier = 3.0
+	var ring_mag := StandardMaterial3D.new()
+	ring_mag.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mag.albedo_color = Color(1.0, 0.35, 0.9)
+	ring_mag.emission_enabled = true
+	ring_mag.emission = Color(1.0, 0.3, 0.85)
+	ring_mag.emission_energy_multiplier = 3.0
+	var torus_a := TorusMesh.new()
+	torus_a.inner_radius = 34.0
+	torus_a.outer_radius = 38.0
+	var torus_b := TorusMesh.new()
+	torus_b.inner_radius = 26.0
+	torus_b.outer_radius = 28.5
+	var portal := MeshInstance3D.new()
+	portal.mesh = _bake_mesh([[ring_cyan, [[torus_a, Transform3D()]]], [ring_mag, [[torus_b, Transform3D()]]]])
+	portal.transform = _at(Vector3(9.0, 24.0, z_min - 200.0), Vector3(90.0, 0.0, 0.0))
+	add_child(portal)
+	var portal_light := OmniLight3D.new()
+	portal_light.light_color = Color(0.4, 0.85, 1.0)
+	portal_light.light_energy = 1.8
+	portal_light.omni_range = 200.0
+	portal_light.shadow_enabled = false
+	portal_light.transform = _at(Vector3(9.0, 20.0, z_min - 160.0))
+	add_child(portal_light)
+	var pulse := create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	pulse.tween_property(portal, "scale", Vector3.ONE * 1.06, 3.5)
+	pulse.tween_property(portal, "scale", Vector3.ONE, 3.5)
+
+	# Drifting data packets (one MultiMesh)
+	var packet_mesh := BoxMesh.new()
+	packet_mesh.size = Vector3(0.7, 0.7, 0.7)
+	var packet_mat := StandardMaterial3D.new()
+	packet_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	packet_mat.vertex_color_use_as_albedo = true
+	packet_mesh.material = packet_mat
+	var packet_mm := MultiMesh.new()
+	packet_mm.transform_format = MultiMesh.TRANSFORM_3D
+	packet_mm.use_colors = true
+	packet_mm.mesh = packet_mesh
+	packet_mm.instance_count = 160
+	for i in 160:
+		var px: float
+		var py: float
+		if rng.randf() < 0.22:
+			px = rng.randf_range(-25.0, 45.0)
+			py = rng.randf_range(32.0, 85.0)
+		else:
+			px = 9.0 + (-1.0 if rng.randf() < 0.5 else 1.0) * rng.randf_range(32.0, 140.0)
+			py = rng.randf_range(-18.0, 70.0)
+		var pz := rng.randf_range(z_min - 120.0, 5.0)
+		var s := rng.randf_range(0.5, 1.8)
+		var pb := Basis(Vector3.UP, rng.randf_range(0.0, TAU)) * Basis.from_scale(Vector3.ONE * s)
+		packet_mm.set_instance_transform(i, Transform3D(pb, Vector3(px, py, pz)))
+		var roll := rng.randf()
+		var col := Color(0.35, 0.95, 1.0)
+		if roll < 0.2:
+			col = Color(1.0, 0.35, 0.9)
+		elif roll < 0.32:
+			col = Color(0.95, 0.98, 1.0)
+		packet_mm.set_instance_color(i, col)
+	var packets := MultiMeshInstance3D.new()
+	packets.multimesh = packet_mm
+	add_child(packets)
+	var drift := create_tween().set_loops().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	drift.tween_property(packets, "position:y", 3.0, 6.0)
+	drift.tween_property(packets, "position:y", 0.0, 6.0)
+
+	# Vertical light pillars rising from the floor grid (one MultiMesh)
+	var pillar_mesh := CylinderMesh.new()
+	pillar_mesh.top_radius = 0.5
+	pillar_mesh.bottom_radius = 0.5
+	pillar_mesh.height = 1.0
+	pillar_mesh.radial_segments = 6
+	pillar_mesh.rings = 1
+	pillar_mesh.cap_top = false
+	pillar_mesh.cap_bottom = false
+	var pillar_mat := StandardMaterial3D.new()
+	pillar_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pillar_mat.albedo_color = Color(0.5, 0.9, 1.0)
+	pillar_mat.emission_enabled = true
+	pillar_mat.emission = Color(0.4, 0.85, 1.0)
+	pillar_mat.emission_energy_multiplier = 1.6
+	pillar_mesh.material = pillar_mat
+	var pillar_mm := MultiMesh.new()
+	pillar_mm.transform_format = MultiMesh.TRANSFORM_3D
+	pillar_mm.mesh = pillar_mesh
+	pillar_mm.instance_count = 22
+	for i in 22:
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var lx := 9.0 + side * rng.randf_range(32.0, 130.0)
+		var lz := rng.randf_range(z_min - 80.0, -30.0)
+		var lh := rng.randf_range(18.0, 55.0)
+		pillar_mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3(1.0, lh, 1.0)), Vector3(lx, -25.0 + lh * 0.5, lz)))
+	var pillars := MultiMeshInstance3D.new()
+	pillars.multimesh = pillar_mm
+	add_child(pillars)
+
+	# Light-cycle trail beams along the floor (one baked surface)
+	var beam_mat := StandardMaterial3D.new()
+	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beam_mat.albedo_color = Color(1.0, 0.3, 0.85)
+	beam_mat.emission_enabled = true
+	beam_mat.emission = Color(1.0, 0.25, 0.8)
+	beam_mat.emission_energy_multiplier = 2.2
+	var beam_parts: Array = []
+	for off in [-112.0, -58.0, 62.0, 118.0]:
+		beam_parts.append([unit_box, Transform3D(Basis.from_scale(Vector3(1.4, 0.3, z_span + 500.0)), Vector3(9.0 + off, -24.5, z_min * 0.5))])
+	var beams := MeshInstance3D.new()
+	beams.mesh = _bake_mesh([[beam_mat, beam_parts]])
+	add_child(beams)
+
+# ---------------- The Graveyard (theme 5) ----------------
+
+static var _wreck_plate_tex: ImageTexture
+
+func _wreck_plate_texture() -> ImageTexture:
+	if _wreck_plate_tex != null:
+		return _wreck_plate_tex
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xDEAD5A17
+	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	for y in 64:
+		for x in 64:
+			var v := 0.58 + rng.randf_range(-0.05, 0.05)
+			if y == 21 or y == 42:
+				v -= 0.16
+			if (y < 21 and x == 40) or (y >= 21 and y < 42 and x == 14) or (y >= 42 and x == 50):
+				v -= 0.14
+			var edge := mini(mini(x, 63 - x), mini(y, 63 - y))
+			var c := Color(v, v * 0.94, v * 0.87)
+			if edge < 2:
+				var w := 0.92 - 0.1 * edge + rng.randf_range(-0.04, 0.04)
+				c = Color(w, w * 0.97, w * 0.9)
+			elif edge == 2:
+				c = c.darkened(0.4)
+			img.set_pixel(x, y, c)
+	for ry in [6, 21, 42, 57]:
+		for rx in [6, 57]:
+			img.set_pixel(rx, ry, Color(0.9, 0.87, 0.8))
+			img.set_pixel(rx + 1, ry + 1, Color(0.18, 0.16, 0.14))
+	for s in 6:
+		var sx := rng.randi_range(6, 50)
+		var sy := rng.randi_range(6, 50)
+		var dy := -1 if rng.randf() < 0.5 else 1
+		for k in rng.randi_range(7, 15):
+			var px := sx + k
+			var py := sy + k * dy
+			if px > 2 and px < 61 and py > 2 and py < 61:
+				img.set_pixel(px, py, img.get_pixel(px, py).lightened(0.35))
+	for e in 4:
+		img.set_pixel(rng.randi_range(8, 55), rng.randi_range(8, 55), Color(0.75, 0.4, 0.18))
+	img.generate_mipmaps()
+	_wreck_plate_tex = ImageTexture.create_from_image(img)
+	return _wreck_plate_tex
+
+@warning_ignore("unused_parameter")
+func _make_wreck_tile(h: int, glow: float, tile_tex: ImageTexture) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	var t := clampf((h - 1) / 8.0, 0.0, 1.0)
+	mat.albedo_color = Color(0.4, 0.31, 0.25).lerp(Color(0.55, 0.51, 0.46), t)
+	mat.metallic = 0.6
+	mat.metallic_specular = 0.45
+	mat.roughness = 0.82 - 0.14 * t
+	_apply_tile_texture(mat, _wreck_plate_texture())
+	mat.emission_enabled = true
+	mat.emission = Color(0.62, 0.24, 0.08).lerp(Color(0.5, 0.34, 0.18), t)
+	mat.emission_energy_multiplier = glow * (0.55 + 0.05 * h)
+	return mat
+
+func _create_wreck_background():
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0x6E4C0FF1
+	var z_min := minf(-400.0, _env_end_z - 100.0)
+	var box := func(sx: float, sy: float, sz: float) -> BoxMesh:
+		var m := BoxMesh.new()
+		m.size = Vector3(sx, sy, sz)
+		return m
+	var cyl := func(r: float, h: float) -> CylinderMesh:
+		var m := CylinderMesh.new()
+		m.top_radius = r
+		m.bottom_radius = r
+		m.height = h
+		m.radial_segments = 10
+		m.rings = 1
+		return m
+
+	var hull_mat := StandardMaterial3D.new()
+	hull_mat.albedo_color = Color(0.19, 0.17, 0.16)
+	hull_mat.metallic = 0.45
+	hull_mat.roughness = 0.85
+	var bone_mat := StandardMaterial3D.new()
+	bone_mat.albedo_color = Color(0.58, 0.54, 0.48)
+	bone_mat.metallic = 0.15
+	bone_mat.roughness = 0.9
+	var glass_mat := StandardMaterial3D.new()
+	glass_mat.albedo_color = Color(0.04, 0.04, 0.05)
+	glass_mat.metallic = 0.9
+	glass_mat.roughness = 0.25
+	var ember_mat := StandardMaterial3D.new()
+	ember_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ember_mat.albedo_color = Color(0.85, 0.32, 0.09)
+	ember_mat.emission_enabled = true
+	ember_mat.emission = Color(0.85, 0.32, 0.09)
+	ember_mat.emission_energy_multiplier = 1.4
+
+	# dead star low on the horizon, ash ring around it
+	var star_pos := Vector3(140.0, 25.0, z_min - 220.0)
+	var core := MeshInstance3D.new()
+	var core_mesh := SphereMesh.new()
+	core_mesh.radius = 55.0
+	core_mesh.height = 110.0
+	core_mesh.radial_segments = 24
+	core_mesh.rings = 12
+	core.mesh = core_mesh
+	var core_mat := StandardMaterial3D.new()
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core_mat.albedo_color = Color(0.82, 0.75, 0.65)
+	core.material_override = core_mat
+	core.transform = _at(star_pos)
+	add_child(core)
+	var halo := MeshInstance3D.new()
+	var halo_mesh := SphereMesh.new()
+	halo_mesh.radius = 85.0
+	halo_mesh.height = 170.0
+	halo_mesh.radial_segments = 24
+	halo_mesh.rings = 12
+	halo.mesh = halo_mesh
+	var halo_mat := StandardMaterial3D.new()
+	halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	halo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	halo_mat.cull_mode = BaseMaterial3D.CULL_FRONT
+	halo_mat.albedo_color = Color(0.8, 0.5, 0.3, 0.1)
+	halo.material_override = halo_mat
+	halo.transform = _at(star_pos)
+	add_child(halo)
+	var ring := MeshInstance3D.new()
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = 75.0
+	ring_mesh.outer_radius = 115.0
+	ring_mesh.rings = 40
+	ring_mesh.ring_segments = 6
+	ring.mesh = ring_mesh
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.albedo_color = Color(0.3, 0.25, 0.21)
+	ring.material_override = ring_mat
+	ring.transform = _at(star_pos, Vector3(78, 0, 12)).scaled_local(Vector3(1, 0.12, 1))
+	add_child(ring)
+
+	# dim ash starfield, occasional ember star
+	var star_mm := MultiMesh.new()
+	star_mm.transform_format = MultiMesh.TRANSFORM_3D
+	star_mm.use_colors = true
+	var star_quad := QuadMesh.new()
+	star_quad.size = Vector2(1.4, 1.4)
+	var star_mat := StandardMaterial3D.new()
+	star_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	star_mat.vertex_color_use_as_albedo = true
+	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	star_mat.billboard_keep_scale = true
+	star_quad.material = star_mat
+	star_mm.mesh = star_quad
+	star_mm.instance_count = 220
+	var star_center := Vector3(9.0, 0.0, z_min * 0.5)
+	for i in 220:
+		var dir := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.15, 1.0), rng.randf_range(-1.0, 1.0))
+		if dir.length() < 0.05:
+			dir = Vector3(0.3, 0.5, -0.8)
+		var p := star_center + dir.normalized() * rng.randf_range(500.0, 900.0)
+		var sb := Basis.from_scale(Vector3.ONE * rng.randf_range(0.6, 1.8))
+		star_mm.set_instance_transform(i, Transform3D(sb, p))
+		var c := Color(0.7, 0.68, 0.64) * rng.randf_range(0.35, 0.95)
+		if i % 9 == 0:
+			c = Color(0.75, 0.45, 0.25) * rng.randf_range(0.5, 0.9)
+		star_mm.set_instance_color(i, c)
+	var star_mi := MultiMeshInstance3D.new()
+	star_mi.multimesh = star_mm
+	add_child(star_mi)
+
+	# far silhouette slabs - dead hulls against the sky
+	var slab_mm := MultiMesh.new()
+	slab_mm.transform_format = MultiMesh.TRANSFORM_3D
+	var slab_mesh := BoxMesh.new()
+	slab_mesh.size = Vector3(46.0, 13.0, 4.0)
+	var slab_mat := StandardMaterial3D.new()
+	slab_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	slab_mat.albedo_color = Color(0.045, 0.04, 0.038)
+	slab_mesh.material = slab_mat
+	slab_mm.mesh = slab_mesh
+	slab_mm.instance_count = 12
+	for i in 12:
+		var s_side := 1.0 if i % 2 == 0 else -1.0
+		var sp := Vector3(9.0 + s_side * rng.randf_range(160.0, 320.0), rng.randf_range(-50.0, 120.0), rng.randf_range(z_min - 150.0, -80.0))
+		var bb := Basis.from_euler(Vector3(rng.randf_range(-0.4, 0.4), rng.randf_range(0.0, TAU), rng.randf_range(-0.6, 0.6)))
+		bb = bb.scaled(Vector3.ONE * rng.randf_range(0.8, 2.4))
+		slab_mm.set_instance_transform(i, Transform3D(bb, sp))
+	var slab_mi := MultiMeshInstance3D.new()
+	slab_mi.multimesh = slab_mm
+	add_child(slab_mi)
+
+	# drifting debris chips
+	var debris_mat := StandardMaterial3D.new()
+	debris_mat.albedo_color = Color(0.32, 0.28, 0.25)
+	debris_mat.metallic = 0.5
+	debris_mat.roughness = 0.8
+	var debris_mm := MultiMesh.new()
+	debris_mm.transform_format = MultiMesh.TRANSFORM_3D
+	var chip := BoxMesh.new()
+	chip.size = Vector3(1.4, 0.5, 1.0)
+	chip.material = debris_mat
+	debris_mm.mesh = chip
+	debris_mm.instance_count = 140
+	for i in 140:
+		var d_side := 1.0 if rng.randf() < 0.5 else -1.0
+		var dx := 9.0 + d_side * rng.randf_range(30.0, 130.0)
+		var dy := rng.randf_range(-45.0, 70.0)
+		if absf(dx - 9.0) < 42.0 and dy > -12.0 and dy < 12.0:
+			dy = -20.0 - rng.randf_range(0.0, 20.0)
+		var dz := rng.randf_range(z_min - 60.0, 20.0)
+		var db := Basis.from_euler(Vector3(rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU)))
+		db = db.scaled(Vector3.ONE * rng.randf_range(0.5, 2.2))
+		debris_mm.set_instance_transform(i, Transform3D(db, Vector3(dx, dy, dz)))
+	var debris_mi := MultiMeshInstance3D.new()
+	debris_mi.multimesh = debris_mm
+	add_child(debris_mi)
+
+	# wreck A: capital ship snapped amidships, ribs bared at the break
+	var a_hull: Array = [
+		[box.call(24.0, 6.0, 9.0), _at(Vector3(-17, 0.5, 0), Vector3(0, 0, 6))],
+		[box.call(28.0, 7.5, 10.0), _at(Vector3(13, -1.5, 0.8), Vector3(2, 5, -9))],
+		[box.call(9.0, 9.0, 11.0), _at(Vector3(26.5, -2.5, 0.8), Vector3(0, 0, -9))],
+		[box.call(7.0, 4.0, 4.5), _at(Vector3(10, 4.2, 0), Vector3(0, 0, -9))],
+		[cyl.call(0.6, 22.0), _at(Vector3(-26, 5, 2), Vector3(12, 0, 64))],
+		[cyl.call(0.8, 8.0), _at(Vector3(-4, 4, -3), Vector3(70, 0, 20))],
+	]
+	var a_bone: Array = [
+		[box.call(23.0, 0.4, 8.2), _at(Vector3(-17, 3.7, 0), Vector3(0, 0, 6))],
+		[box.call(0.7, 8.0, 0.7), _at(Vector3(-3.5, 0, 2.8), Vector3(6, 0, 14))],
+		[box.call(0.7, 8.5, 0.7), _at(Vector3(-2.6, 0.3, 0), Vector3(-4, 0, -8))],
+		[box.call(0.7, 7.5, 0.7), _at(Vector3(-3.8, -0.5, -2.6), Vector3(10, 0, 5))],
+		[box.call(3.0, 5.0, 8.0), _at(Vector3(-30.5, 0.5, 0), Vector3(0, 0, 22))],
+	]
+	var a_glass: Array = [
+		[box.call(20.0, 0.7, 0.3), _at(Vector3(-17, 1.6, 4.6), Vector3(0, 0, 6))],
+		[box.call(20.0, 0.7, 0.3), _at(Vector3(-17, 1.6, -4.6), Vector3(0, 0, 6))],
+		[box.call(24.0, 0.8, 0.3), _at(Vector3(13, 0.4, 5.7), Vector3(2, 5, -9))],
+	]
+	var a_ember: Array = [
+		[box.call(1.0, 4.0, 6.0), _at(Vector3(-3.0, -0.6, 0.5), Vector3(0, 0, -6))],
+		[cyl.call(3.0, 0.4), _at(Vector3(31.3, -3.2, 0.8), Vector3(0, 0, 96))],
+	]
+	var wreck_a := _bake_mesh([
+		[hull_mat, a_hull],
+		[bone_mat, a_bone],
+		[glass_mat, a_glass],
+		[ember_mat, a_ember],
+	])
+	var spacing := absf(z_min) / 4.0
+	var reactor_pos := Vector3.ZERO
+	for i in 4:
+		var inst := MeshInstance3D.new()
+		inst.mesh = wreck_a
+		var side := 1.0 if i % 2 == 0 else -1.0
+		var pos := Vector3(9.0 + side * rng.randf_range(75.0, 110.0), rng.randf_range(-30.0, 55.0), -spacing * (i + 0.5))
+		inst.position = pos
+		inst.rotation_degrees = Vector3(rng.randf_range(-22.0, 22.0), rng.randf_range(0.0, 360.0), rng.randf_range(-35.0, 35.0))
+		inst.scale = Vector3.ONE * rng.randf_range(0.9, 1.25)
+		add_child(inst)
+		if i == 0:
+			reactor_pos = pos
+
+	# wreck B: snapped keel hulk
+	var b_hull: Array = [
+		[cyl.call(1.1, 30.0), _at(Vector3.ZERO, Vector3(0, 0, 90))],
+		[box.call(12.0, 4.5, 7.0), _at(Vector3(-6, -2.2, 1), Vector3(8, 0, -14))],
+		[box.call(8.0, 3.5, 6.0), _at(Vector3(7, 1.8, -1.5), Vector3(-5, 10, 18))],
+	]
+	var b_bone: Array = [
+		[box.call(0.6, 7.0, 0.6), _at(Vector3(2, 0, 0), Vector3(0, 0, 15))],
+		[box.call(0.6, 6.5, 0.6), _at(Vector3(5, 0.4, 0.6), Vector3(20, 0, -10))],
+		[box.call(0.6, 7.5, 0.6), _at(Vector3(-1, -0.3, -0.5), Vector3(-15, 0, 8))],
+		[cyl.call(1.3, 3.0), _at(Vector3(-16.2, 0, 0), Vector3(0, 0, 90))],
+	]
+	var wreck_b := _bake_mesh([
+		[hull_mat, b_hull],
+		[bone_mat, b_bone],
+	])
+	for i in 2:
+		var inst := MeshInstance3D.new()
+		inst.mesh = wreck_b
+		var side := -1.0 if i % 2 == 0 else 1.0
+		inst.position = Vector3(9.0 + side * rng.randf_range(55.0, 90.0), rng.randf_range(-35.0, 60.0), -spacing * (i + 1.0) + rng.randf_range(-20.0, 20.0))
+		inst.rotation_degrees = Vector3(rng.randf_range(-30.0, 30.0), rng.randf_range(0.0, 360.0), rng.randf_range(-50.0, 50.0))
+		inst.scale = Vector3.ONE * rng.randf_range(0.8, 1.4)
+		add_child(inst)
+	var tumbler := MeshInstance3D.new()
+	tumbler.mesh = wreck_b
+	tumbler.position = Vector3(-69.0, 42.0, -spacing * 3.4)
+	tumbler.rotation_degrees = Vector3(18, 140, 0)
+	tumbler.scale = Vector3.ONE * 1.1
+	add_child(tumbler)
+	var tumble_tw := create_tween().set_loops()
+	tumble_tw.tween_property(tumbler, "rotation:z", TAU, 110.0).as_relative()
+
+	# dying reactor inside the first wreck: welding-spark flicker
+	var reactor := OmniLight3D.new()
+	reactor.light_color = Color(1.0, 0.45, 0.15)
+	reactor.omni_range = 70.0
+	reactor.light_energy = 0.0
+	reactor.shadow_enabled = false
+	reactor.position = reactor_pos
+	add_child(reactor)
+	var flicker := create_tween().set_loops()
+	flicker.tween_property(reactor, "light_energy", 1.3, 0.12)
+	flicker.tween_property(reactor, "light_energy", 0.15, 0.3)
+	flicker.tween_property(reactor, "light_energy", 0.9, 0.1)
+	flicker.tween_property(reactor, "light_energy", 0.0, 0.6)
+	flicker.tween_interval(2.4)
+	flicker.tween_property(reactor, "light_energy", 1.1, 0.1)
+	flicker.tween_property(reactor, "light_energy", 0.0, 0.4)
+	flicker.tween_interval(3.6)
+
+# ---------------- The Bloom (theme 6) ----------------
+
+static var _bloom_moss_tex: ImageTexture
+
+@warning_ignore("unused_parameter")
+func _make_bloom_tile(h: int, glow: float, tile_tex: ImageTexture) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	var t := (h - 1) / 8.0
+	mat.albedo_color = Color(0.82 + 0.14 * t, 0.9 - 0.05 * t, 0.86 - 0.12 * t)
+	mat.roughness = 0.85
+	mat.metallic = 0.0
+	var moss := _get_bloom_moss_texture()
+	_apply_tile_texture(mat, moss)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.45, 0.62).lerp(Color(1.0, 0.78, 0.38), t)
+	mat.emission_energy_multiplier = glow * (0.85 + 0.06 * h)
+	mat.emission_texture = moss
+	mat.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+	return mat
+
+func _get_bloom_moss_texture() -> ImageTexture:
+	if _bloom_moss_tex:
+		return _bloom_moss_tex
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xB100D
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	for y in 64:
+		for x in 64:
+			var n := rng.randf()
+			var base := Color(0.16, 0.30, 0.24).lerp(Color(0.24, 0.40, 0.28), n)
+			if rng.randf() < 0.04:
+				base = base.lerp(Color(0.55, 0.72, 0.50), 0.6)
+			img.set_pixel(x, y, base)
+	for i in 7:
+		var edge := rng.randi_range(0, 3)
+		var px := 0.0
+		var py := 0.0
+		var ang := 0.0
+		match edge:
+			0:
+				px = rng.randf_range(4.0, 60.0)
+				py = 1.0
+				ang = PI * 0.5
+			1:
+				px = rng.randf_range(4.0, 60.0)
+				py = 62.0
+				ang = -PI * 0.5
+			2:
+				px = 1.0
+				py = rng.randf_range(4.0, 60.0)
+				ang = 0.0
+			_:
+				px = 62.0
+				py = rng.randf_range(4.0, 60.0)
+				ang = PI
+		var steps := rng.randi_range(14, 26)
+		for s in steps:
+			var fade := 1.0 - float(s) / float(steps)
+			_bloom_vein_dot(img, int(px), int(py), fade)
+			ang += rng.randf_range(-0.6, 0.6)
+			px = clampf(px + cos(ang), 1.0, 62.0)
+			py = clampf(py + sin(ang), 1.0, 62.0)
+	for k in 64:
+		for b in 2:
+			for p in [Vector2i(k, b), Vector2i(k, 63 - b), Vector2i(b, k), Vector2i(63 - b, k)]:
+				var c := img.get_pixel(p.x, p.y)
+				img.set_pixel(p.x, p.y, Color(c.r * 0.35, c.g * 0.35, c.b * 0.35))
+	img.generate_mipmaps()
+	_bloom_moss_tex = ImageTexture.create_from_image(img)
+	return _bloom_moss_tex
+
+func _bloom_vein_dot(img: Image, x: int, y: int, fade: float) -> void:
+	var vein := Color(0.95, 0.42, 0.58)
+	for oy in range(-1, 2):
+		for ox in range(-1, 2):
+			var qx := x + ox
+			var qy := y + oy
+			if qx < 0 or qx > 63 or qy < 0 or qy > 63:
+				continue
+			var w := (0.9 * fade) if (ox == 0 and oy == 0) else (0.3 * fade)
+			img.set_pixel(qx, qy, img.get_pixel(qx, qy).lerp(vein, w))
+
+func _create_bloom_background():
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xB100
+	var z_min := minf(-400.0, _env_end_z - 100.0)
+
+	# Giant luminous fungus: baked once, instanced 6 times
+	var stalk_mat := StandardMaterial3D.new()
+	stalk_mat.albedo_color = Color(0.10, 0.20, 0.16)
+	stalk_mat.roughness = 1.0
+	stalk_mat.emission_enabled = true
+	stalk_mat.emission = Color(0.15, 0.35, 0.28)
+	stalk_mat.emission_energy_multiplier = 0.15
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = Color(0.55, 0.20, 0.30)
+	cap_mat.roughness = 0.7
+	cap_mat.emission_enabled = true
+	cap_mat.emission = Color(1.0, 0.45, 0.60)
+	cap_mat.emission_energy_multiplier = 1.1
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = Color(1.0, 0.80, 0.50)
+	glow_mat.emission_enabled = true
+	glow_mat.emission = Color(1.0, 0.78, 0.40)
+	glow_mat.emission_energy_multiplier = 2.5
+
+	var s1 := CylinderMesh.new()
+	s1.bottom_radius = 3.6
+	s1.top_radius = 2.6
+	s1.height = 34.0
+	s1.radial_segments = 10
+	s1.rings = 1
+	var s2 := CylinderMesh.new()
+	s2.bottom_radius = 2.6
+	s2.top_radius = 1.9
+	s2.height = 26.0
+	s2.radial_segments = 10
+	s2.rings = 1
+	var s3 := CylinderMesh.new()
+	s3.bottom_radius = 1.9
+	s3.top_radius = 1.2
+	s3.height = 18.0
+	s3.radial_segments = 10
+	s3.rings = 1
+	var cap := SphereMesh.new()
+	cap.radius = 9.0
+	cap.height = 10.0
+	cap.radial_segments = 16
+	cap.rings = 8
+	var gills := TorusMesh.new()
+	gills.inner_radius = 4.0
+	gills.outer_radius = 8.0
+	gills.rings = 24
+	gills.ring_segments = 6
+	var spot := SphereMesh.new()
+	spot.radius = 0.9
+	spot.radial_segments = 8
+	spot.rings = 4
+
+	var stalk_parts := [
+		[s1, _at(Vector3(0.0, 17.0, 0.0), Vector3(0, 0, 4))],
+		[s2, _at(Vector3(2.2, 46.0, 0.0), Vector3(0, 0, 11))],
+		[s3, _at(Vector3(6.4, 67.0, 0.0), Vector3(0, 0, 20))],
+	]
+	var cap_parts := [[cap, _at(Vector3(10.5, 79.0, 0.0), Vector3(0, 0, 20))]]
+	var glow_parts := [
+		[gills, _at(Vector3(10.0, 76.0, 0.0), Vector3(0, 0, 20))],
+		[spot, _at(Vector3(8.0, 83.5, 3.0))],
+		[spot, _at(Vector3(13.5, 82.5, -2.0))],
+		[spot, _at(Vector3(10.5, 84.5, 0.5))],
+		[spot, _at(Vector3(7.0, 81.5, -3.5))],
+		[spot, _at(Vector3(14.0, 83.0, 2.5))],
+	]
+	var fungus_mesh := _bake_mesh([[stalk_mat, stalk_parts], [cap_mat, cap_parts], [glow_mat, glow_parts]])
+	for i in 6:
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var fx := 9.0 + side * rng.randf_range(42.0, 70.0)
+		var fz := -70.0 - (absf(z_min) - 140.0) * float(i) / 5.0 + rng.randf_range(-20.0, 20.0)
+		var mi := MeshInstance3D.new()
+		mi.mesh = fungus_mesh
+		var sc := rng.randf_range(0.8, 1.35)
+		mi.transform = _at(Vector3(fx, -40.0, fz), Vector3(0.0, rng.randf_range(0.0, 360.0), 0.0)).scaled_local(Vector3.ONE * sc)
+		add_child(mi)
+
+	# Hanging vine-arcs: 4 tori baked into one mesh
+	var vine_mat := StandardMaterial3D.new()
+	vine_mat.albedo_color = Color(0.08, 0.17, 0.13)
+	vine_mat.roughness = 1.0
+	vine_mat.emission_enabled = true
+	vine_mat.emission = Color(0.85, 0.40, 0.50)
+	vine_mat.emission_energy_multiplier = 0.25
+	var arc := TorusMesh.new()
+	arc.inner_radius = 43.0
+	arc.outer_radius = 45.0
+	arc.rings = 40
+	arc.ring_segments = 6
+	var arc_parts := []
+	for i in 4:
+		var az := -120.0 - (absf(z_min) - 220.0) * float(i) / 3.0
+		arc_parts.append([arc, _at(Vector3(9.0 + rng.randf_range(-8.0, 8.0), -12.0, az), Vector3(90.0, 0.0, rng.randf_range(-10.0, 10.0)))])
+	var arcs_mi := MeshInstance3D.new()
+	arcs_mi.mesh = _bake_mesh([[vine_mat, arc_parts]])
+	add_child(arcs_mi)
+
+	# Garden floor far below
+	var floor_mesh := PlaneMesh.new()
+	floor_mesh.size = Vector2(700.0, absf(z_min) + 400.0)
+	var floor_mat := StandardMaterial3D.new()
+	floor_mat.albedo_color = Color(0.05, 0.10, 0.08)
+	floor_mat.roughness = 1.0
+	floor_mat.emission_enabled = true
+	floor_mat.emission = Color(0.10, 0.22, 0.16)
+	floor_mat.emission_energy_multiplier = 0.25
+	floor_mesh.material = floor_mat
+	var floor_mi := MeshInstance3D.new()
+	floor_mi.mesh = floor_mesh
+	floor_mi.transform = _at(Vector3(9.0, -55.0, z_min * 0.5))
+	add_child(floor_mi)
+
+	# Mother bloom on the horizon: core + corolla baked + 2 aura shells
+	var bloom_pos := Vector3(-15.0, 22.0, z_min - 80.0)
+	var core_mat := StandardMaterial3D.new()
+	core_mat.albedo_color = Color(1.0, 0.60, 0.55)
+	core_mat.emission_enabled = true
+	core_mat.emission = Color(1.0, 0.55, 0.50)
+	core_mat.emission_energy_multiplier = 1.8
+	var core_sphere := SphereMesh.new()
+	core_sphere.radius = 42.0
+	core_sphere.height = 84.0
+	core_sphere.radial_segments = 24
+	core_sphere.rings = 12
+	var corolla := TorusMesh.new()
+	corolla.inner_radius = 46.0
+	corolla.outer_radius = 58.0
+	corolla.rings = 32
+	corolla.ring_segments = 8
+	var bloom_core := MeshInstance3D.new()
+	bloom_core.mesh = _bake_mesh([
+		[core_mat, [[core_sphere, Transform3D()]]],
+		[glow_mat, [[corolla, _at(Vector3.ZERO, Vector3(70.0, 0.0, 15.0))]]],
+	])
+	bloom_core.transform = _at(bloom_pos)
+	add_child(bloom_core)
+	for j in 2:
+		var shell := SphereMesh.new()
+		shell.radius = 58.0 + 22.0 * j
+		shell.height = shell.radius * 2.0
+		shell.radial_segments = 20
+		shell.rings = 10
+		var sm := StandardMaterial3D.new()
+		sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		sm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		sm.cull_mode = BaseMaterial3D.CULL_FRONT
+		sm.albedo_color = Color(1.0, 0.50, 0.55, 0.16 - 0.07 * j)
+		shell.material = sm
+		var smi := MeshInstance3D.new()
+		smi.mesh = shell
+		smi.transform = _at(bloom_pos)
+		add_child(smi)
+
+	# Soft radial dot texture shared by motes and fireflies
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1, 1, 1, 1))
+	grad.set_color(1, Color(1, 1, 1, 0))
+	var dot_tex := GradientTexture2D.new()
+	dot_tex.gradient = grad
+	dot_tex.fill = GradientTexture2D.FILL_RADIAL
+	dot_tex.fill_from = Vector2(0.5, 0.5)
+	dot_tex.fill_to = Vector2(0.5, 0.0)
+	dot_tex.width = 32
+	dot_tex.height = 32
+
+	# Drifting spore motes: one MultiMesh
+	var mote_mat := StandardMaterial3D.new()
+	mote_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mote_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mote_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mote_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mote_mat.albedo_texture = dot_tex
+	mote_mat.albedo_color = Color(1.0, 0.75, 0.85, 0.5)
+	var mote_quad := QuadMesh.new()
+	mote_quad.size = Vector2(0.9, 0.9)
+	mote_quad.material = mote_mat
+	var motes := MultiMesh.new()
+	motes.transform_format = MultiMesh.TRANSFORM_3D
+	motes.mesh = mote_quad
+	motes.instance_count = 260
+	for i in 260:
+		var mx := rng.randf_range(-70.0, 90.0)
+		var my := rng.randf_range(-15.0, 45.0)
+		var mz := rng.randf_range(z_min - 60.0, 20.0)
+		if mx > -8.0 and mx < 28.0 and my < 10.0:
+			my += 24.0
+		motes.set_instance_transform(i, Transform3D(Basis(), Vector3(mx, my, mz)))
+	var motes_mi := MultiMeshInstance3D.new()
+	motes_mi.multimesh = motes
+	add_child(motes_mi)
+
+	# Fireflies: one MultiMesh, material pulsed by tween
+	var fly_mat := StandardMaterial3D.new()
+	fly_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fly_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fly_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	fly_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	fly_mat.albedo_texture = dot_tex
+	fly_mat.albedo_color = Color(1.0, 0.82, 0.40, 0.8)
+	var fly_quad := QuadMesh.new()
+	fly_quad.size = Vector2(1.4, 1.4)
+	fly_quad.material = fly_mat
+	var flies := MultiMesh.new()
+	flies.transform_format = MultiMesh.TRANSFORM_3D
+	flies.mesh = fly_quad
+	flies.instance_count = 70
+	for i in 70:
+		var fside := -1.0 if rng.randf() < 0.5 else 1.0
+		var pos := Vector3(9.0 + fside * rng.randf_range(30.0, 70.0), rng.randf_range(-8.0, 24.0), rng.randf_range(z_min, -20.0))
+		flies.set_instance_transform(i, Transform3D(Basis(), pos))
+	var flies_mi := MultiMeshInstance3D.new()
+	flies_mi.multimesh = flies
+	add_child(flies_mi)
+
+	# Two shadowless omni lights
+	var l1 := OmniLight3D.new()
+	l1.light_color = Color(1.0, 0.55, 0.55)
+	l1.light_energy = 1.4
+	l1.omni_range = 300.0
+	l1.shadow_enabled = false
+	l1.position = bloom_pos + Vector3(0.0, 20.0, 60.0)
+	add_child(l1)
+	var l2 := OmniLight3D.new()
+	l2.light_color = Color(1.0, 0.80, 0.50)
+	l2.light_energy = 0.7
+	l2.omni_range = 140.0
+	l2.shadow_enabled = false
+	l2.position = Vector3(45.0, 20.0, z_min * 0.4)
+	add_child(l2)
+
+	# Ambient motion: the bloom breathes, the fireflies pulse
+	var pulse := create_tween().set_loops()
+	pulse.tween_property(bloom_core, "scale", Vector3.ONE * 1.03, 2.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	pulse.tween_property(bloom_core, "scale", Vector3.ONE, 2.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	var flicker2 := create_tween().set_loops()
+	flicker2.tween_property(fly_mat, "albedo_color", Color(1.0, 0.86, 0.48, 0.9), 1.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	flicker2.tween_property(fly_mat, "albedo_color", Color(1.0, 0.72, 0.32, 0.35), 1.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)

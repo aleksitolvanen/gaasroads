@@ -1,5 +1,5 @@
-# Static completability check for GENERATED tracks: builds 320 tracks
-# (80 per theme) with maxed-out difficulty params and asserts the invariants
+# Static completability check for GENERATED tracks: builds 80 tracks per
+# theme with maxed-out difficulty params and asserts the invariants
 # the generator guarantees: every row transition has a climbable column path,
 # gaps fit the run-up/air-time budget, gap landings are at or below takeoff
 # height, and tunnel bores are flat, gap-free and enterable without a jump.
@@ -9,13 +9,13 @@
 # asserted against ship.gd's export defaults, so drift fails loudly here.
 #
 # Run:  godot --headless --path . -s tests/gen_constraints.gd
-# Pass: "checked 320 tracks, 0 violations", exit code 0.
+# Pass: "checked N tracks, 0 violations", exit code 0.
 extends SceneTree
 
 func _initialize():
 	var failures := _check_ship_constants()
 	var tracks := 0
-	for theme in 4:
+	for theme in LevelGenerator.GROUP_GRAVITY.size():
 		var lim: Dictionary = LevelGenerator.jump_limits(theme)
 		for trial in 80:
 			var p := {

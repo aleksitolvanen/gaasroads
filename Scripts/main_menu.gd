@@ -23,6 +23,27 @@ const GROUPS := [
 		"tracks": ["Rift", "Shadow", "Warp", "Abyss", "Omega"],
 	},
 	{
+		"name": "THE GRID",
+		"sub": "riding the datastream - narrow lanes, pixel-perfect jumps",
+		"color": Color(0.25, 0.95, 1.0),
+		"prefix": "grid", "theme": 4, "save_id": 6, "kind": "tracks",
+		"tracks": ["Mainframe"],
+	},
+	{
+		"name": "THE GRAVEYARD",
+		"sub": "thread the bones of a broken fleet",
+		"color": Color(0.78, 0.42, 0.24),
+		"prefix": "wreck", "theme": 5, "save_id": 7, "kind": "tracks",
+		"tracks": ["Requiem"],
+	},
+	{
+		"name": "THE BLOOM",
+		"sub": "drift through the garden while it dreams",
+		"color": Color(0.98, 0.6, 0.72),
+		"prefix": "bloom", "theme": 6, "save_id": 8, "kind": "tracks",
+		"tracks": ["Pollenfall"],
+	},
+	{
 		"name": "PROCEDURAL",
 		"sub": "generated tracks and endless mode",
 		"color": Color(0.85, 0.75, 0.35),
@@ -200,8 +221,9 @@ func _build_home():
 	tagline.add_theme_font_size_override("font_size", 14)
 	_home_root.add_child(tagline)
 
+	var step := minf(0.105, 0.62 / maxf(4.0, GROUPS.size() - 1))
 	for g in GROUPS.size():
-		var frac := 0.30 + g * 0.105
+		var frac := 0.28 + g * step
 		var name_label := Label.new()
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		name_label.anchor_right = 1
@@ -217,9 +239,9 @@ func _build_home():
 		sub_label.anchor_right = 1
 		sub_label.anchor_top = frac
 		sub_label.anchor_bottom = frac
-		sub_label.offset_top = 38
-		sub_label.offset_bottom = 56
-		sub_label.add_theme_font_size_override("font_size", 13)
+		sub_label.offset_top = 34
+		sub_label.offset_bottom = 50
+		sub_label.add_theme_font_size_override("font_size", 12)
 		_home_root.add_child(sub_label)
 		_home_subs.append(sub_label)
 

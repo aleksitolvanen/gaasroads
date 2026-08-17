@@ -24,14 +24,14 @@ that).
 
 ### 2. Generator constraints — `tests/gen_constraints.gd`
 
-Generates 320 tracks (80 per theme) at maximum difficulty settings and
+Generates 80 tracks per theme at maximum difficulty settings and
 statically verifies the invariants the generator guarantees: climbable steps,
 gaps within the run-up/air-time budget, landings at or below takeoff height,
 and tunnel bores that are flat, gap-free and enterable without a jump.
 
     godot --headless --path . -s tests/gen_constraints.gd
 
-Pass: `checked 320 tracks, 0 violations`. Limits come from
+Pass: `checked N tracks, 0 violations`. Limits come from
 `LevelGenerator.jump_limits()` / `_max_gap_rows()` — the generator's own
 formulas — and the ship performance constants (`SHIP_ACCEL`,
 `SHIP_MAX_SPEED`, `SHIP_LATERAL_SPEED`) are asserted against `ship.gd`'s
@@ -89,7 +89,7 @@ Flags:
 | `--tape F` | write the winning input tape (`W/S` + `A/D` + `J` per line) |
 | `--dump-trace F` | write the winning tape's per-entry trajectory (reference for the tape-replay harness) |
 
-Expected: all 15 authored levels report `COMPLETABLE` within seconds.
+Expected: all 18 authored levels report `COMPLETABLE` within seconds.
 
 **Caveats**: routes that need deep movement tech (bounce chains, coyote-delay
 jumps) can hide behind millions of states — before trusting a "no" on a

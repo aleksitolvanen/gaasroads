@@ -1,6 +1,6 @@
-# Menu smoke test: home screen builds with 5 groups, every sub-screen opens
-# and closes, settings rows adjust, and launching a track loads the game
-# scene with the right group/level selected.
+# Menu smoke test: home screen builds one entry per group, every sub-screen
+# opens and closes, settings rows adjust, and launching a track loads the
+# game scene with the right group/level selected.
 #
 # Run:  godot --headless --path . -s tests/smoke_menu.gd
 # Pass: "MENU SMOKE OK".
@@ -23,12 +23,17 @@ func _process(_delta) -> bool:
 	if scene == null:
 		return false
 	if _phase == 1 and scene is Control:
-		assert(scene._home_names.size() == 5, "expected 5 home entries")
-		for g in 4:
+		assert(scene._home_names.size() == scene.GROUPS.size(), "one home entry per group expected")
+		var settings_idx := -1
+		for g in scene.GROUPS.size():
+			if scene.GROUPS[g]["kind"] == "settings":
+				settings_idx = g
+				continue
 			scene._open_group(g)
 			assert(scene._sub_labels.size() > 0, "no rows for group %d" % g)
 			scene._close_sub()
-		scene._open_group(4)
+		assert(settings_idx >= 0, "no settings group found")
+		scene._open_group(settings_idx)
 		assert(scene._sub_labels.size() == 8, "expected 8 settings rows")
 		scene._adjust_custom(1)
 		scene._adjust_custom(-1)

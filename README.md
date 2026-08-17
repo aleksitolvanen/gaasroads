@@ -12,7 +12,8 @@ Web version: https://needlefi.itch.io/gaasroads
 
 ## Features
 
-- 15 authored tracks across 3 themed groups (Nebula Run, Solar Burn, Dark Matter)
+- 18 authored tracks across 6 themed groups (Nebula Run, Solar Burn, Dark
+  Matter, The Grid, The Graveyard, The Bloom)
 - Procedural presets, custom track settings and endless mode
 - Track sharing: compact paste codes for generated tracks, raw text for the rest
 - ASCII text file-based level design

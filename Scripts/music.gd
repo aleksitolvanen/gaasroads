@@ -39,6 +39,10 @@ func play_for_group(group: int):
 	if enabled:
 		_start_playback()
 
+# Themes beyond the four baked tracks reuse the closest-fitting one
+const GROUP_TRACK := [0, 1, 2, 3, 0, 3, 1]
+
 func _start_playback():
-	_player.stream = TRACKS[clampi(current_group, 0, TRACKS.size() - 1)]
+	var idx: int = GROUP_TRACK[clampi(current_group, 0, GROUP_TRACK.size() - 1)]
+	_player.stream = TRACKS[idx]
 	_player.play()
